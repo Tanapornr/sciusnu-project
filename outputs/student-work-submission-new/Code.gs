@@ -10,7 +10,7 @@ var SETTINGS = {
 var SHEETS = {
   users: {
     name: 'Users',
-    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt']
+    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt', 'phone']
   },
   projects: {
     name: 'Projects',
@@ -22,7 +22,7 @@ var SHEETS = {
   },
   requests: {
     name: 'Requests',
-    headers: ['requestId', 'projectId', 'requesterId', 'requesterName', 'requestType', 'typeText', 'status', 'payload', 'signatures', 'currentSignerId', 'currentSignerName', 'currentSignerRole', 'createdAt', 'updatedAt', 'completedAt']
+    headers: ['requestId', 'projectId', 'requesterId', 'requesterName', 'requestType', 'typeText', 'status', 'payload', 'signatures', 'currentSignerId', 'currentSignerName', 'currentSignerRole', 'createdAt', 'updatedAt', 'completedAt', 'pdfUrl', 'pdfFileId']
   },
   audit: {
     name: 'AuditLog',
@@ -56,6 +56,10 @@ function doPost(e) {
 function authorizeProjectFlow_() {
   ensureSheets_();
   DriveApp.getFolderById(SETTINGS.driveFolderId).getName();
+  var authDoc = DocumentApp.create('ProjectFlow authorization check');
+  authDoc.getBody().appendParagraph('Authorization check for PDF generation');
+  authDoc.saveAndClose();
+  DriveApp.getFileById(authDoc.getId()).setTrashed(true);
   MailApp.getRemainingDailyQuota();
   return {
     ok: true,
@@ -136,15 +140,15 @@ function dashboard_(user) {
   var submissions = readRows_(SHEETS.submissions).filter(function (submission) {
     return user.role === 'admin' || projectIds.indexOf(submission.projectId) !== -1;
   }).map(function (submission) {
-    return enrichSubmission_(submission, projects);
+    return enrichSubmission_(submission, projects, user);
   });
   submissions.sort(function (a, b) {
     return new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0);
   });
 
-  var canReview = ['advisor', 'co_advisor', 'school_advisor', 'admin'].indexOf(user.role) !== -1;
+  var canReview = ['advisor', 'admin'].indexOf(user.role) !== -1;
   var reviewQueue = canReview ? submissions.filter(function (submission) {
-    return ['ส่งแล้ว', 'รอตรวจ'].indexOf(String(submission.status || '')) !== -1;
+    return submission.canReview && ['ส่งแล้ว', 'รอตรวจ'].indexOf(String(submission.status || '')) !== -1;
   }) : [];
   var requests = filterRequestsForUser_(readRows_(SHEETS.requests), user, projects, users);
   var requestStats = requestStats_(requests);
@@ -211,7 +215,7 @@ function submitWork_(user, payload) {
 }
 
 function reviewSubmission_(user, payload) {
-  if (['advisor', 'co_advisor', 'school_advisor', 'admin'].indexOf(user.role) === -1) {
+  if (['advisor', 'admin'].indexOf(user.role) === -1) {
     throw new Error('บัญชีนี้ไม่มีสิทธิ์ตรวจงาน');
   }
 
@@ -222,7 +226,7 @@ function reviewSubmission_(user, payload) {
   var project = readRows_(SHEETS.projects).filter(function (item) { return item.projectId === submission.projectId; })[0];
   if (!project) throw new Error('ไม่พบโครงงานของรายการนี้');
 
-  if (user.role !== 'admin' && filterProjectsForUser_([project], user).length === 0) {
+  if (!canReviewSubmission_(user, project)) {
     throw new Error('บัญชีนี้ไม่มีสิทธิ์ตรวจโครงงานนี้');
   }
 
@@ -253,9 +257,9 @@ function createRequest_(user, payload) {
     throw new Error('กรุณาเลือกประเภทคำร้องที่เปิดใช้งาน');
   }
 
-  var ownerSignature = String(payload.ownerSignature || '').trim();
+  var ownerSignature = String(user.name || payload.ownerSignature || '').trim();
   if (!ownerSignature) {
-    throw new Error('กรุณาเซ็นเอกสารคำร้องก่อนส่ง');
+    throw new Error('ไม่พบชื่อผู้ยื่นคำร้องในบัญชีผู้ใช้');
   }
 
   var projects = readRows_(SHEETS.projects);
@@ -274,9 +278,12 @@ function createRequest_(user, payload) {
   var signatures = buildRequestSigners_(project, user, users, now, ownerSignature);
   var nextSigner = nextUnsignedSigner_(signatures);
   var requestPayload = {
-    prefix: payload.prefix || '',
-    classLevel: payload.classLevel || '',
-    phone: payload.phone || '',
+    requesterName: user.name || '',
+    requesterEmail: user.email || '',
+    requesterStudentId: studentKey,
+    prefix: '',
+    classLevel: '',
+    phone: user.phone || payload.phone || '',
     newTitleTh: payload.newTitleTh || '',
     newTitleEn: payload.newTitleEn || '',
     currentBranch: project.school || '',
@@ -308,6 +315,13 @@ function createRequest_(user, payload) {
     notifyRequestSigner_(request, nextSigner, project);
   } else {
     applyRequestEffect_(request, project);
+    var createdPdf = generateRequestPdf_(request, project, users);
+    request.pdfUrl = createdPdf.url;
+    request.pdfFileId = createdPdf.id;
+    updateRowById_(SHEETS.requests, 'requestId', request.requestId, {
+      pdfUrl: createdPdf.url,
+      pdfFileId: createdPdf.id
+    });
     notifyRequestCompleted_(request, project, users);
   }
   audit_(user.userId, 'createRequest', request.requestId + ' ' + request.typeText);
@@ -316,9 +330,9 @@ function createRequest_(user, payload) {
 
 function signRequest_(user, payload) {
   var requestId = String(payload.requestId || '').trim();
-  var signature = String(payload.signature || '').trim();
+  var signature = String(user.name || payload.signature || '').trim();
   if (!requestId) throw new Error('ไม่พบเลขคำร้อง');
-  if (!signature) throw new Error('กรุณาพิมพ์ชื่อเพื่อเซ็นอิเล็กทรอนิกส์');
+  if (!signature) throw new Error('ไม่พบชื่อผู้เซ็นในบัญชีผู้ใช้');
 
   var requests = readRows_(SHEETS.requests);
   var request = requests.filter(function (item) { return item.requestId === requestId; })[0];
@@ -363,7 +377,16 @@ function signRequest_(user, payload) {
     updates.completedAt = now;
     request.status = updates.status;
     request.signatures = updates.signatures;
+    request.completedAt = now;
+    request.currentSignerId = '';
+    request.currentSignerName = '';
+    request.currentSignerRole = '';
     applyRequestEffect_(request, project);
+    var pdf = generateRequestPdf_(request, project, users);
+    updates.pdfUrl = pdf.url;
+    updates.pdfFileId = pdf.id;
+    request.pdfUrl = pdf.url;
+    request.pdfFileId = pdf.id;
     notifyRequestCompleted_(request, project, users);
   }
 
@@ -373,7 +396,7 @@ function signRequest_(user, payload) {
 }
 
 function sendReminder_(user) {
-  if (['advisor', 'co_advisor', 'school_advisor', 'admin'].indexOf(user.role) === -1) {
+  if (['advisor', 'admin'].indexOf(user.role) === -1) {
     throw new Error('บัญชีนี้ไม่มีสิทธิ์ส่งแจ้งเตือน');
   }
 
@@ -407,6 +430,7 @@ function createUser_(user, payload) {
     email: normalized.email || '',
     studentId: normalized.studentId || '',
     school: normalized.school || '',
+    phone: normalized.phone || '',
     active: 'TRUE',
     mustChangePassword: normalized.mustChangePassword ? 'TRUE' : 'FALSE',
     createdAt: now,
@@ -474,6 +498,7 @@ function generateStudentAccounts_(user) {
         email: '',
         studentId: studentId,
         school: project.school || '',
+        phone: '',
         active: 'TRUE',
         mustChangePassword: 'TRUE',
         createdAt: now,
@@ -521,6 +546,7 @@ function syncSourceDataFromSheet1_() {
 
   var values = source.getDataRange().getValues();
   if (values.length <= 1) throw new Error('sheet1 ยังไม่มีข้อมูลนำเข้า');
+  var sourceHeaders = values[0].map(function (value) { return clean_(value).toLowerCase(); });
 
   ensureSheets_();
   var now = new Date().toISOString();
@@ -549,6 +575,7 @@ function syncSourceDataFromSheet1_() {
     var firstName = clean_(row[2]);
     var lastName = clean_(row[3]);
     var major = clean_(row[4]);
+    var studentPhone = phoneFromSourceRow_(row, sourceHeaders);
     var projectId = clean_(row[5]);
     var advisorEmail = clean_(row[8]);
     var advisorName = clean_(row[9]);
@@ -571,6 +598,7 @@ function syncSourceDataFromSheet1_() {
         email: studentEmail,
         studentId: studentId,
         school: major,
+        phone: studentPhone,
         active: 'TRUE',
         createdAt: now,
         updatedAt: now,
@@ -620,6 +648,7 @@ function syncSourceDataFromSheet1_() {
       email: item.email,
       studentId: '',
       school: item.school,
+      phone: '',
       active: 'TRUE',
       createdAt: now,
       updatedAt: now,
@@ -662,6 +691,7 @@ function normalizeNewUser_(payload) {
   var generated = !payload.password;
   var email = String(payload.email || '').trim();
   var studentId = String(payload.studentId || '').trim();
+  var phone = String(payload.phone || '').trim();
   var mustChangePassword = role === 'student';
 
   if (!payload.name) throw new Error('กรุณากรอกชื่อ-สกุล');
@@ -677,6 +707,7 @@ function normalizeNewUser_(payload) {
       email: email,
       studentId: studentUser,
       school: payload.school || '',
+      phone: phone,
       generated: generated,
       mustChangePassword: mustChangePassword
     };
@@ -692,6 +723,7 @@ function normalizeNewUser_(payload) {
     email: staffUser,
     studentId: '',
     school: payload.school || '',
+    phone: phone,
     generated: generated,
     mustChangePassword: false
   };
@@ -757,7 +789,7 @@ function sendCredentialEmail_(user) {
 
 function notifyReviewers_(project, submission) {
   var users = readRows_(SHEETS.users);
-  var reviewerIds = [project.advisorId, project.coAdvisorId, project.schoolAdvisorId].filter(Boolean);
+  var reviewerIds = [project.advisorId].filter(Boolean);
   var recipients = users.filter(function (user) {
     return (reviewerIds.indexOf(user.userId) !== -1 || reviewerIds.indexOf(user.email) !== -1) && user.email;
   });
@@ -876,9 +908,6 @@ function enrichRequest_(request, project, user, users) {
 
 function validateRequestPayload_(requestType, payload, project) {
   if (!payload.projectId) throw new Error('กรุณาเลือกโครงงาน');
-  if (!payload.prefix || !payload.classLevel || !payload.phone) {
-    throw new Error('กรุณากรอกข้อมูลผู้ยื่นคำร้องให้ครบ');
-  }
   if (requestType === 'project_name') {
     if (!payload.newTitleTh && !payload.newTitleEn) throw new Error('กรุณากรอกชื่อโครงงานใหม่');
     if (!payload.reason) throw new Error('กรุณาระบุเหตุผล');
@@ -1049,6 +1078,78 @@ function buildProjectTitle_(payload) {
   return thai || english || '';
 }
 
+function generateRequestPdf_(request, project, users) {
+  var payload = parseJson_(request.payload, {});
+  var signatures = parseSignatures_(request.signatures);
+  var root = DriveApp.getFolderById(SETTINGS.driveFolderId);
+  var requestFolder = getOrCreateFolder_(root, 'คำร้องทั่วไป');
+  var docTitle = sanitizeFileName_(request.requestId + ' - ' + request.typeText);
+  var doc = DocumentApp.create(docTitle);
+  var body = doc.getBody();
+
+  body.appendParagraph('แบบคำร้องออนไลน์').setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph(SETTINGS.appName + ' | ' + request.requestId);
+  body.appendParagraph('');
+  body.appendTable([
+    ['ประเภทคำร้อง', request.typeText || requestTypeText_(request.requestType)],
+    ['สถานะ', request.status || 'อนุมัติแล้ว'],
+    ['วันที่ยื่นคำร้อง', formatThaiDateTime_(request.createdAt)],
+    ['วันที่อนุมัติครบ', formatThaiDateTime_(request.completedAt || request.updatedAt)],
+    ['เจ้าของเรื่อง', request.requesterName || payload.requesterName || '-'],
+    ['รหัสนักเรียน', request.requesterId || payload.requesterStudentId || '-'],
+    ['เบอร์ติดต่อ', payload.phone || '-'],
+    ['รหัสโครงงาน', project.projectId || request.projectId],
+    ['ชื่อโครงงาน', project.title || request.projectId],
+    ['รายละเอียดคำร้อง', requestPdfDetail_(request, payload, project)]
+  ]);
+
+  body.appendParagraph('');
+  body.appendParagraph('ลำดับลายเซ็นอิเล็กทรอนิกส์').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  var signatureRows = [['ลำดับ', 'บทบาท', 'ชื่อผู้เซ็น', 'ลายเซ็น', 'วันเวลา']];
+  signatures.forEach(function (signer, index) {
+    signatureRows.push([
+      String(index + 1),
+      signer.label || signer.role || '-',
+      signer.name || '-',
+      signer.signature || signer.signedName || '-',
+      formatThaiDateTime_(signer.signedAt)
+    ]);
+  });
+  body.appendTable(signatureRows);
+  body.appendParagraph('');
+  body.appendParagraph('เอกสารนี้สร้างโดยระบบอัตโนมัติหลังผู้เกี่ยวข้องเซ็นครบทุกลำดับ');
+
+  doc.saveAndClose();
+  var docFile = DriveApp.getFileById(doc.getId());
+  var pdfBlob = docFile.getAs(MimeType.PDF).setName(docTitle + '.pdf');
+  var pdfFile = requestFolder.createFile(pdfBlob);
+  pdfFile.setDescription('Approved request PDF generated by ' + SETTINGS.appName + ' for ' + request.requestId);
+  docFile.setTrashed(true);
+
+  return {
+    id: pdfFile.getId(),
+    url: pdfFile.getUrl(),
+    name: pdfFile.getName()
+  };
+}
+
+function requestPdfDetail_(request, payload, project) {
+  if (request.requestType === 'project_name') {
+    return 'ขอเปลี่ยนชื่อโครงงานจาก "' + (project.title || '-') + '" เป็น "' + buildProjectTitle_(payload) + '" เหตุผล: ' + (payload.reason || '-');
+  }
+  if (request.requestType === 'project_branch') {
+    return 'ขอเปลี่ยนสาขาจาก "' + (payload.currentBranch || project.school || '-') + '" เป็น "' + (payload.newBranch || '-') + '" เหตุผล: ' + (payload.reason || '-');
+  }
+  return (payload.otherSubject || '-') + ' — ' + (payload.otherDetail || '-');
+}
+
+function formatThaiDateTime_(value) {
+  if (!value) return '-';
+  var date = new Date(value);
+  if (isNaN(date.getTime())) return String(value);
+  return Utilities.formatDate(date, 'Asia/Bangkok', 'dd/MM/yyyy HH:mm');
+}
+
 function notifyRequestSigner_(request, signer, project) {
   if (!signer.email) return;
   var payload = parseJson_(request.payload, {});
@@ -1080,18 +1181,49 @@ function notifyRequestCompleted_(request, project, users) {
       'คำร้องของคุณได้รับการเซ็นครบทุกลำดับแล้ว',
       'ประเภทคำร้อง: ' + request.typeText,
       'โครงงาน: ' + (project.title || request.projectId),
+      request.pdfUrl ? 'ไฟล์ PDF คำร้องพร้อมลายเซ็น: ' + request.pdfUrl : '',
       '',
       'ระบบได้ปรับข้อมูลที่เกี่ยวข้องให้อัตโนมัติแล้ว (หากเป็นคำร้องเปลี่ยนชื่อหรือสาขาโครงงาน)'
-    ].join('\n')
+    ].filter(function (line) { return line !== ''; }).join('\n')
   );
 }
 
-function enrichSubmission_(submission, projects) {
+function enrichSubmission_(submission, projects, user) {
   var project = projects.filter(function (item) { return item.projectId === submission.projectId; })[0] || {};
   submission.projectTitle = project.title || submission.projectId;
   submission.dueDate = project.dueDate || '';
   if (!submission.studentNames) submission.studentNames = project.studentNames || submission.studentId || '';
+  submission.canViewFile = canViewSubmissionFile_(user, project);
+  submission.canReview = canReviewSubmission_(user, project);
+  if (!submission.canViewFile) {
+    submission.fileUrl = '';
+    submission.fileName = '';
+    submission.driveFileId = '';
+  }
   return submission;
+}
+
+function canViewSubmissionFile_(user, project) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'student') {
+    var studentKey = String(user.studentId || user.userId || '');
+    return split_(project.studentIds).indexOf(studentKey) !== -1;
+  }
+  return canReviewSubmission_(user, project);
+}
+
+function canReviewSubmission_(user, project) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role !== 'advisor') return false;
+  var userKeys = [user.userId, user.email].filter(Boolean).map(function (value) {
+    return String(value).trim().toLowerCase();
+  });
+  var advisorKeys = [project.advisorId].filter(Boolean).map(function (value) {
+    return String(value).trim().toLowerCase();
+  });
+  return advisorKeys.some(function (key) { return userKeys.indexOf(key) !== -1; });
 }
 
 function enrichProject_(project, users) {
@@ -1194,6 +1326,7 @@ function safeUser_(user) {
     email: user.email,
     studentId: user.studentId,
     school: user.school,
+    phone: user.phone,
     mustChangePassword: toBoolean_(user.mustChangePassword)
   };
 }
@@ -1232,6 +1365,7 @@ function ensureSheets_() {
       email: SETTINGS.adminEmail,
       studentId: '',
       school: '',
+      phone: '',
       active: 'TRUE',
       mustChangePassword: 'FALSE',
       createdAt: now,
@@ -1271,7 +1405,7 @@ function getSheet_(definition) {
 function formatUsersSheet_() {
   var sheet = getSheet_(SHEETS.users);
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  ['userId', 'password', 'studentId'].forEach(function (header) {
+  ['userId', 'password', 'studentId', 'phone'].forEach(function (header) {
     var index = headers.indexOf(header);
     if (index !== -1) sheet.getRange(1, index + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
   });
@@ -1343,6 +1477,19 @@ function split_(value) {
 
 function clean_(value) {
   return String(value || '').trim();
+}
+
+function phoneFromSourceRow_(row, headers) {
+  var phoneHeaders = ['phone', 'tel', 'mobile', 'เบอร์', 'โทร', 'ติดต่อ'];
+  for (var index = 0; index < headers.length; index += 1) {
+    var header = String(headers[index] || '').toLowerCase();
+    var matched = phoneHeaders.some(function (keyword) { return header.indexOf(keyword) !== -1; });
+    if (matched) return clean_(row[index]);
+  }
+  return [clean_(row[6]), clean_(row[7])].filter(function (value) {
+    var digits = value.replace(/\D/g, '');
+    return digits.length >= 8 && digits.length <= 12;
+  })[0] || '';
 }
 
 function collectStaff_(staff, existingUsers, role, name, email, school, projectId) {

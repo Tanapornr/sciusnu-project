@@ -981,6 +981,19 @@ a {
   width: fit-content;
 }
 
+.request-pdf-link {
+  width: fit-content;
+}
+
+.review-status-only {
+  border-radius: 999px;
+  padding: 0.5rem 0.75rem;
+  color: #64748b;
+  background: rgba(241, 245, 249, 0.92);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
 .request-modal {
   position: fixed;
   inset: 0;
@@ -1142,6 +1155,34 @@ a {
 .request-owner-grid > strong {
   grid-column: 1 / -1;
   color: var(--muted);
+}
+
+.owner-readonly-field,
+.signature-auto-name {
+  display: grid;
+  gap: 0.22rem;
+  border: 1px solid rgba(20, 184, 166, 0.15);
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.owner-readonly-field span,
+.signature-auto-name span {
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+}
+
+.owner-readonly-field strong,
+.signature-auto-name strong {
+  color: #111827;
+}
+
+.signature-auto-name small {
+  color: var(--muted);
+  font-weight: 780;
 }
 
 .signature-panel {

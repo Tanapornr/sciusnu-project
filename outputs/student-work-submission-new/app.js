@@ -467,7 +467,7 @@ function renderSubmissions(submissions) {
       <h3>${escapeHtml(item.title || item.projectId)}</h3>
       <p>${escapeHtml(item.note || 'ไม่มีหมายเหตุ')}</p>
       ${item.reviewerNote ? `<p><strong>ข้อเสนอแนะ:</strong> ${escapeHtml(item.reviewerNote)}</p>` : ''}
-      ${item.fileUrl ? `<a href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์งาน</a>` : ''}
+      ${item.canViewFile !== false && item.fileUrl ? `<a href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์งาน</a>` : ''}
     </article>
   `).join('');
 }
@@ -489,9 +489,11 @@ function renderReviewQueue(queue) {
       <p>${escapeHtml(item.studentNames || item.studentId || '-')}</p>
       <p>${escapeHtml(item.note || 'ไม่มีหมายเหตุจากนักเรียน')}</p>
       <div class="review-actions">
-        ${item.fileUrl ? `<a class="mini-button link" href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}
-        <button class="mini-button approve" data-review-action="อนุมัติ" data-submission-id="${escapeAttribute(item.submissionId)}">อนุมัติ</button>
-        <button class="mini-button revise" data-review-action="ขอแก้ไข" data-submission-id="${escapeAttribute(item.submissionId)}">ส่งแก้ไข</button>
+        ${item.canViewFile !== false && item.fileUrl ? `<a class="mini-button link" href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}
+        ${item.canReview !== false ? `
+          <button class="mini-button approve" data-review-action="อนุมัติ" data-submission-id="${escapeAttribute(item.submissionId)}">อนุมัติ</button>
+          <button class="mini-button revise" data-review-action="ขอแก้ไข" data-submission-id="${escapeAttribute(item.submissionId)}">ส่งแก้ไข</button>
+        ` : `<span class="review-status-only">ดูสถานะได้เท่านั้น</span>`}
       </div>
     </article>
   `).join('');
@@ -544,6 +546,11 @@ function renderRequests(requests, stats) {
             </span>
           `).join('')}
         </div>
+        ${request.pdfUrl ? `
+          <a class="mini-button link request-pdf-link" href="${escapeAttribute(request.pdfUrl)}" target="_blank" rel="noopener">
+            เปิด PDF คำร้องพร้อมลายเซ็น
+          </a>
+        ` : ''}
         ${request.canSign ? `
           <button class="primary-button request-sign-button" type="button" data-sign-request="${escapeAttribute(request.requestId)}">
             เซ็นอิเล็กทรอนิกส์
@@ -669,9 +676,9 @@ async function nextRequestStep() {
       return;
     }
     if (state.requestWizard.step === 3) {
-      const signature = document.getElementById('ownerSignatureName').value.trim();
+      const signature = state.auth?.user?.name || '';
       const accepted = document.getElementById('ownerSignatureConfirm').checked;
-      if (!signature) throw new Error('กรุณาพิมพ์ชื่อเพื่อเซ็นอิเล็กทรอนิกส์');
+      if (!signature) throw new Error('ไม่พบชื่อผู้ยื่นคำร้องในบัญชีผู้ใช้');
       if (!accepted) throw new Error('กรุณายืนยันการเซ็นอิเล็กทรอนิกส์');
       state.requestWizard.submitting = true;
       renderRequestModal();
@@ -756,6 +763,7 @@ function requestTypeStepMarkup() {
 function requestFormStepMarkup() {
   const type = state.requestWizard.type;
   const payload = state.requestWizard.payload || {};
+  const user = state.auth?.user || {};
   const projects = state.dashboard?.projects || [];
   const selectedProjectId = payload.projectId || projects[0]?.projectId || '';
   return `
@@ -774,12 +782,21 @@ function requestFormStepMarkup() {
       </select>
     </label>
     <div class="request-owner-grid">
-      <strong>ข้อมูลผู้ยื่นคำร้อง</strong>
-      <label>คำนำหน้า * <input id="requestPrefix" value="${escapeAttribute(payload.prefix || '')}" placeholder="เช่น นาย / นางสาว" required></label>
-      <label>รุ่น วมว. * <input id="requestClassLevel" value="${escapeAttribute(payload.classLevel || '')}" placeholder="เช่น 15" required></label>
-      <label>เบอร์ติดต่อ * <input id="requestPhone" value="${escapeAttribute(payload.phone || '')}" placeholder="0818834211" required></label>
+      <strong>ข้อมูลผู้ยื่นคำร้อง (ดึงจากบัญชีผู้ใช้)</strong>
+      ${requestOwnerReadonlyField('ชื่อ-นามสกุล', user.name || '-')}
+      ${requestOwnerReadonlyField('รหัสนักเรียน', user.studentId || user.userId || '-')}
+      ${requestOwnerReadonlyField('เบอร์ติดต่อ', user.phone || 'ยังไม่มีข้อมูลในชีต')}
     </div>
     ${requestDynamicFieldsMarkup(type, payload, selectedProjectId)}
+  `;
+}
+
+function requestOwnerReadonlyField(label, value) {
+  return `
+    <div class="owner-readonly-field">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || '-')}</strong>
+    </div>
   `;
 }
 
@@ -831,9 +848,11 @@ function requestSignatureStepMarkup() {
         <span>ผู้ยื่น</span><span>เพื่อน</span><span>อาจารย์หลัก</span><span>อาจารย์ร่วม</span><span>อาจารย์โรงเรียน</span><span>admin</span>
       </div>
       ${requestSignatureDocumentMarkup()}
-      <label class="full-field">พิมพ์ชื่อ-สกุลเพื่อเซ็น *
-        <input id="ownerSignatureName" value="${escapeAttribute(user.name || '')}" required>
-      </label>
+      <div class="signature-auto-name">
+        <span>ลายเซ็นผู้ยื่นคำร้อง</span>
+        <strong>${escapeHtml(user.name || '-')}</strong>
+        <small>ระบบดึงชื่อจากบัญชีที่เข้าสู่ระบบ ไม่ต้องพิมพ์ชื่อซ้ำ</small>
+      </div>
       <label class="check-line">
         <input id="ownerSignatureConfirm" type="checkbox">
         <span>ข้าพเจ้าขอยืนยันว่าข้อมูลในคำร้องนี้ถูกต้อง และยอมรับการใช้ลายเซ็นอิเล็กทรอนิกส์</span>
@@ -857,7 +876,7 @@ function requestSignatureDocumentMarkup() {
         <div>
           <small>เจ้าของเรื่อง</small>
           <strong>${escapeHtml(user.name || '-')}</strong>
-          <span>${escapeHtml(ownerId)}</span>
+          <span>${escapeHtml(ownerId)}${user.phone ? ` · ${escapeHtml(user.phone)}` : ''}</span>
         </div>
         <div>
           <small>โครงงาน</small>
@@ -868,8 +887,8 @@ function requestSignatureDocumentMarkup() {
       <p>${escapeHtml(requestDocumentDetailText(state.requestWizard.type, payload, project))}</p>
       <div class="signature-stamp">
         <small>ลงชื่อผู้ยื่นคำร้อง</small>
-        <strong>${escapeHtml(user.name || 'กรุณาพิมพ์ชื่อด้านล่าง')}</strong>
-        <span>ระบบจะใช้ชื่อที่พิมพ์ด้านล่างเป็นลายเซ็นอิเล็กทรอนิกส์</span>
+        <strong>${escapeHtml(user.name || '-')}</strong>
+        <span>ระบบใช้ชื่อจากบัญชีที่เข้าสู่ระบบเป็นลายเซ็นอิเล็กทรอนิกส์</span>
       </div>
     </section>
   `;
@@ -877,14 +896,18 @@ function requestSignatureDocumentMarkup() {
 
 function collectRequestFormData() {
   const type = state.requestWizard.type;
+  const user = state.auth?.user || {};
   const payload = {
     projectId: document.getElementById('requestProjectId').value,
-    prefix: document.getElementById('requestPrefix').value.trim(),
-    classLevel: document.getElementById('requestClassLevel').value.trim(),
-    phone: document.getElementById('requestPhone').value.trim()
+    requesterName: user.name || '',
+    requesterStudentId: user.studentId || user.userId || '',
+    phone: user.phone || ''
   };
-  if (!payload.projectId || !payload.prefix || !payload.classLevel || !payload.phone) {
-    throw new Error('กรุณากรอกข้อมูลผู้ยื่นคำร้องให้ครบ');
+  if (!payload.projectId) {
+    throw new Error('กรุณาเลือกโครงงาน');
+  }
+  if (!payload.requesterName) {
+    throw new Error('ไม่พบชื่อผู้ยื่นคำร้องในบัญชีผู้ใช้');
   }
   if (type === 'project_name') {
     payload.newTitleTh = document.getElementById('requestNewTitleTh').value.trim();
@@ -914,10 +937,14 @@ function updateRequestCurrentBranch() {
 }
 
 async function signRequest(requestId) {
-  const signature = window.prompt('พิมพ์ชื่อ-สกุลเพื่อเซ็นอิเล็กทรอนิกส์');
-  if (signature === null) return;
+  const signature = state.auth?.user?.name || '';
+  if (!signature) {
+    toast('ไม่พบชื่อผู้เซ็นในบัญชีผู้ใช้', true);
+    return;
+  }
+  if (!window.confirm(`ยืนยันการเซ็นอิเล็กทรอนิกส์โดย ${signature}`)) return;
   try {
-    await api('signRequest', { requestId, signature: signature.trim() });
+    await api('signRequest', { requestId, signature });
     toast('เซ็นคำร้องเรียบร้อย และแจ้งผู้เซ็นลำดับถัดไปแล้ว');
     await loadDashboard();
   } catch (error) {
@@ -950,7 +977,7 @@ function updateSelectedProjectTitle() {
 
 function applyRoleVisibility(role) {
   const isStudent = role === 'student';
-  const isReviewer = ['advisor', 'co_advisor', 'school_advisor', 'admin'].includes(role);
+  const isReviewer = ['advisor', 'admin'].includes(role);
   const isAdmin = role === 'admin';
 
   document.querySelector('[data-view="submit"]').classList.toggle('hidden', !isStudent);
@@ -1134,6 +1161,7 @@ function toast(message, error = false) {
 function getSubtitle(role) {
   if (role === 'student') return 'ส่งงานใหม่ ติดตามผลตรวจ และดูข้อเสนอแนะจากอาจารย์';
   if (role === 'admin') return 'จัดการผู้ใช้งาน โครงงาน และภาพรวมการส่งงานทั้งหมด';
+  if (['co_advisor', 'school_advisor'].includes(role)) return 'ติดตามสถานะการส่งงานและเซ็นคำร้องตามลำดับที่ได้รับมอบหมาย';
   return 'ตรวจงาน อนุมัติ ส่งแก้ไข และแจ้งเตือนนักเรียนผ่านอีเมล';
 }
 
@@ -1185,7 +1213,7 @@ function getDemoStore() {
   const data = {
     users: [
       { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com', mustChangePassword: false },
-      { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', mustChangePassword: true },
+      { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', phone: '0818834211', mustChangePassword: true },
       { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
     ],
     projects: [
@@ -1387,8 +1415,18 @@ function generateDemoPassword() {
 function demoDashboard(store, user) {
   const projects = filterProjects(store.projects, user);
   const allowedIds = new Set(projects.map(item => item.projectId));
-  const submissions = store.submissions.filter(item => user.role === 'admin' || allowedIds.has(item.projectId));
-  const reviewQueue = ['advisor', 'co_advisor', 'school_advisor', 'admin'].includes(user.role)
+  const submissions = store.submissions.filter(item => user.role === 'admin' || allowedIds.has(item.projectId)).map(item => {
+    const project = projects.find(projectItem => projectItem.projectId === item.projectId) || {};
+    const canReview = user.role === 'admin' || (user.role === 'advisor' && project.advisorId === user.userId);
+    const canViewFile = user.role === 'admin' || user.role === 'student' || canReview;
+    return {
+      ...item,
+      canReview,
+      canViewFile,
+      fileUrl: canViewFile ? item.fileUrl : ''
+    };
+  });
+  const reviewQueue = ['advisor', 'admin'].includes(user.role)
     ? submissions.filter(item => ['ส่งแล้ว', 'รอตรวจ'].includes(item.status))
     : [];
 
