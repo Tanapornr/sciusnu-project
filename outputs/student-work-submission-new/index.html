@@ -51,6 +51,7 @@
       <nav class="nav-list">
         <button class="nav-item active" data-view="overview">ภาพรวม</button>
         <button class="nav-item" data-view="submit">ส่งงาน</button>
+        <button class="nav-item" data-view="requests">คำร้องทั่วไป</button>
         <button class="nav-item" data-view="review">ตรวจงาน</button>
         <button class="nav-item" data-view="admin">จัดการระบบ</button>
       </nav>
@@ -155,6 +156,25 @@
         </article>
       </section>
 
+      <section id="requestsPanel" class="view-panel hidden">
+        <article class="glass-card panel-card wide-card request-workspace">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">Requests</span>
+              <h2>คำร้องทั่วไป</h2>
+              <p>ยื่นคำร้องและติดตามลำดับการเซ็นอิเล็กทรอนิกส์ของนักเรียน เพื่อน อาจารย์ และผู้ดูแลระบบ</p>
+            </div>
+            <button id="openRequestModalButton" class="primary-button" type="button">+ ยื่นคำร้องใหม่</button>
+          </div>
+          <div class="request-alert">
+            <strong>ลำดับการเซ็นคำร้อง</strong>
+            <span>ผู้ยื่นคำร้อง → เพื่อนร่วมโครงงาน → อาจารย์ที่ปรึกษาหลัก → อาจารย์ที่ปรึกษาร่วม → อาจารย์ที่ปรึกษาโรงเรียน → ผู้ดูแลระบบ</span>
+          </div>
+          <div id="requestStatsGrid" class="request-stats-grid"></div>
+          <div id="requestList" class="request-list"></div>
+        </article>
+      </section>
+
       <section id="adminPanel" class="view-panel hidden">
         <div class="two-column">
           <article class="glass-card panel-card">
@@ -212,6 +232,24 @@
       </section>
     </main>
   </section>
+
+  <div id="requestModal" class="request-modal hidden" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
+    <section class="request-dialog glass-card">
+      <header class="request-dialog-head">
+        <div>
+          <h2 id="requestModalTitle">ยื่นคำร้องออนไลน์</h2>
+          <p id="requestStepText">ขั้นตอนที่ 1/4</p>
+        </div>
+        <button id="closeRequestModalButton" class="icon-button" type="button" aria-label="ปิด">×</button>
+      </header>
+      <div id="requestSteps" class="request-steps"></div>
+      <div id="requestModalBody" class="request-modal-body"></div>
+      <footer class="request-dialog-footer">
+        <button id="requestBackButton" class="ghost-button" type="button">ย้อนกลับ</button>
+        <button id="requestNextButton" class="primary-button" type="button">ถัดไป</button>
+      </footer>
+    </section>
+  </div>
 
   <div id="passwordModal" class="password-modal hidden" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
     <form id="changePasswordForm" class="password-card glass-card">

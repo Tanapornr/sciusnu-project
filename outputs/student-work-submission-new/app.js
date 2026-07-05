@@ -10,10 +10,52 @@ const roleText = {
   admin: 'ผู้ดูแลระบบ'
 };
 
+const requestTypes = {
+  add_university_advisor: {
+    label: 'เพิ่มอาจารย์ที่ปรึกษามหาวิทยาลัย',
+    description: 'คำร้องประเภทนี้ปิดรับชั่วคราว',
+    icon: '🏫',
+    disabled: true
+  },
+  add_school_advisor: {
+    label: 'เพิ่มอาจารย์ที่ปรึกษาโรงเรียน',
+    description: 'คำร้องประเภทนี้ปิดรับชั่วคราว',
+    icon: '🏫',
+    disabled: true
+  },
+  withdraw_advisor: {
+    label: 'ถอดถอนอาจารย์ที่ปรึกษา',
+    description: 'คำร้องประเภทนี้ปิดรับชั่วคราว',
+    icon: '🚫',
+    disabled: true
+  },
+  project_name: {
+    label: 'เปลี่ยนชื่อโครงงาน',
+    description: 'ขอเปลี่ยนชื่อโครงงานภาษาไทยและ/หรืออังกฤษ',
+    icon: '✏️'
+  },
+  project_branch: {
+    label: 'เปลี่ยนสาขาโครงงาน',
+    description: 'ขอเปลี่ยนสาขาหรือประเภทของโครงงาน',
+    icon: '🔄'
+  },
+  other: {
+    label: 'คำร้องอื่น ๆ',
+    description: 'คำร้องอื่น ๆ ที่ไม่อยู่ในประเภทข้างต้น',
+    icon: '📝'
+  }
+};
+
 const state = {
   auth: null,
   dashboard: null,
-  view: 'overview'
+  view: 'overview',
+  requestWizard: {
+    step: 1,
+    type: '',
+    payload: {},
+    submitting: false
+  }
 };
 
 const elements = {
@@ -41,6 +83,16 @@ const elements = {
   projectList: document.getElementById('projectList'),
   submissionList: document.getElementById('submissionList'),
   reviewQueue: document.getElementById('reviewQueue'),
+  requestStatsGrid: document.getElementById('requestStatsGrid'),
+  requestList: document.getElementById('requestList'),
+  openRequestModalButton: document.getElementById('openRequestModalButton'),
+  requestModal: document.getElementById('requestModal'),
+  closeRequestModalButton: document.getElementById('closeRequestModalButton'),
+  requestStepText: document.getElementById('requestStepText'),
+  requestSteps: document.getElementById('requestSteps'),
+  requestModalBody: document.getElementById('requestModalBody'),
+  requestBackButton: document.getElementById('requestBackButton'),
+  requestNextButton: document.getElementById('requestNextButton'),
   submitProject: document.getElementById('submitProject'),
   selectedProjectTitle: document.getElementById('selectedProjectTitle'),
   submitForm: document.getElementById('submitForm'),
@@ -77,6 +129,21 @@ function bindEvents() {
   elements.logoutButton.addEventListener('click', logout);
   elements.submitForm.addEventListener('submit', handleSubmitWork);
   elements.submitProject.addEventListener('change', updateSelectedProjectTitle);
+  elements.openRequestModalButton.addEventListener('click', openRequestModal);
+  elements.closeRequestModalButton.addEventListener('click', closeRequestModal);
+  elements.requestBackButton.addEventListener('click', previousRequestStep);
+  elements.requestNextButton.addEventListener('click', nextRequestStep);
+  elements.requestModal.addEventListener('click', event => {
+    if (event.target === elements.requestModal) closeRequestModal();
+  });
+  elements.requestModalBody.addEventListener('click', event => {
+    const typeButton = event.target.closest('[data-request-type]');
+    if (!typeButton) return;
+    selectRequestType(typeButton.dataset.requestType);
+  });
+  elements.requestModalBody.addEventListener('change', event => {
+    if (event.target.id === 'requestProjectId') updateRequestCurrentBranch();
+  });
   elements.reminderButton.addEventListener('click', handleReminder);
   elements.userForm.addEventListener('submit', handleCreateUser);
   elements.projectForm.addEventListener('submit', handleCreateProject);
@@ -88,10 +155,17 @@ function bindEvents() {
 
   document.addEventListener('click', event => {
     const actionButton = event.target.closest('[data-review-action]');
-    if (!actionButton) return;
-    const submissionId = actionButton.dataset.submissionId;
-    const status = actionButton.dataset.reviewAction;
-    reviewSubmission(submissionId, status);
+    if (actionButton) {
+      const submissionId = actionButton.dataset.submissionId;
+      const status = actionButton.dataset.reviewAction;
+      reviewSubmission(submissionId, status);
+      return;
+    }
+
+    const signButton = event.target.closest('[data-sign-request]');
+    if (signButton) {
+      signRequest(signButton.dataset.signRequest);
+    }
   });
 }
 
@@ -300,6 +374,7 @@ function render() {
   const projects = data.projects || [];
   const submissions = data.submissions || [];
   const queue = data.reviewQueue || [];
+  const requests = data.requests || [];
 
   elements.roleBadge.textContent = roleText[user.role] || user.role;
   elements.workspaceTitle.textContent = `สวัสดี ${user.name}`;
@@ -312,6 +387,7 @@ function render() {
   renderProjects(projects);
   renderSubmissions(submissions);
   renderReviewQueue(queue);
+  renderRequests(requests, data.requestStats || deriveRequestStats(requests));
   renderSubmitOptions(projects);
   applyRoleVisibility(user.role);
 }
@@ -418,6 +494,380 @@ function renderReviewQueue(queue) {
   `).join('');
 }
 
+function renderRequests(requests, stats) {
+  renderRequestStats(stats || deriveRequestStats(requests));
+
+  if (!requests.length) {
+    elements.requestList.innerHTML = `
+      <div class="request-empty">
+        <strong>ยังไม่มีคำร้องในหมวดนี้</strong>
+        <span>เริ่มจากการกด “ยื่นคำร้องใหม่” เพื่อสร้างรายการแรก</span>
+      </div>
+    `;
+    return;
+  }
+
+  elements.requestList.innerHTML = requests.map(request => {
+    const payload = request.payloadData || {};
+    const signatures = request.signaturesData || [];
+    const signed = signatures.filter(item => item.status === 'signed').length;
+    const total = signatures.length || 1;
+    return `
+      <article class="request-card">
+        <div class="request-card-head">
+          <span class="request-type">${escapeHtml(request.typeText || requestTypeLabel(request.requestType))}</span>
+          <span class="pill ${requestStatusClass(request.status)}">${escapeHtml(request.status || 'รอดำเนินการ')}</span>
+        </div>
+        <h3>${escapeHtml(request.projectTitle || request.projectId)}</h3>
+        <p>${escapeHtml(requestDetailText(request, payload))}</p>
+        <div class="request-progress">
+          <span style="width:${Math.round((signed / total) * 100)}%"></span>
+        </div>
+        <div class="request-meta">
+          <span>ลายเซ็น ${escapeHtml(request.progressText || `${signed}/${total}`)}</span>
+          <span>คิวถัดไป: ${escapeHtml(request.currentSignerName || 'ครบทุกลำดับ')}</span>
+          <span>${formatDate(request.createdAt)}</span>
+        </div>
+        <div class="signature-list">
+          ${signatures.map(signer => `
+            <span class="${signer.status === 'signed' ? 'is-signed' : ''}">
+              ${escapeHtml(signer.label)} · ${escapeHtml(signer.name || '-')}
+            </span>
+          `).join('')}
+        </div>
+        ${request.canSign ? `
+          <button class="primary-button request-sign-button" type="button" data-sign-request="${escapeAttribute(request.requestId)}">
+            เซ็นอิเล็กทรอนิกส์
+          </button>
+        ` : ''}
+      </article>
+    `;
+  }).join('');
+}
+
+function renderRequestStats(stats) {
+  const items = [
+    ['ทั้งหมด', stats.total || 0],
+    ['รอดำเนินการ', stats.pending || 0],
+    ['อนุมัติแล้ว', stats.approved || 0],
+    ['ปฏิเสธแล้ว', stats.rejected || 0]
+  ];
+  elements.requestStatsGrid.innerHTML = items.map(([label, value]) => `
+    <div class="request-stat-card">
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `).join('');
+}
+
+function deriveRequestStats(requests) {
+  return {
+    total: requests.length,
+    pending: requests.filter(item => item.status === 'รอดำเนินการ').length,
+    approved: requests.filter(item => item.status === 'อนุมัติแล้ว').length,
+    rejected: requests.filter(item => item.status === 'ปฏิเสธแล้ว').length
+  };
+}
+
+function requestDetailText(request, payload) {
+  if (request.requestType === 'project_name') {
+    return `ชื่อใหม่: ${payload.newTitleTh || payload.newTitleEn || '-'}`;
+  }
+  if (request.requestType === 'project_branch') {
+    return `สาขาปัจจุบัน ${payload.currentBranch || '-'} → สาขาใหม่ ${payload.newBranch || '-'}`;
+  }
+  return payload.otherSubject || payload.otherDetail || 'คำร้องอื่น ๆ';
+}
+
+function requestTypeLabel(type) {
+  return requestTypes[type]?.label || 'คำร้องทั่วไป';
+}
+
+function requestStatusClass(status) {
+  if (status === 'อนุมัติแล้ว') return 'success';
+  if (status === 'ปฏิเสธแล้ว') return 'danger';
+  return 'warning';
+}
+
+function openRequestModal() {
+  if (state.auth?.user?.role !== 'student') {
+    toast('เฉพาะนักเรียนเท่านั้นที่ยื่นคำร้องใหม่ได้', true);
+    return;
+  }
+  if (!(state.dashboard?.projects || []).length) {
+    toast('ไม่พบโครงงานในบัญชีนี้', true);
+    return;
+  }
+  state.requestWizard = {
+    step: 1,
+    type: '',
+    payload: {},
+    submitting: false
+  };
+  elements.requestModal.classList.remove('hidden');
+  renderRequestModal();
+}
+
+function closeRequestModal() {
+  elements.requestModal.classList.add('hidden');
+}
+
+function selectRequestType(type) {
+  if (requestTypes[type]?.disabled) return;
+  state.requestWizard.type = type;
+  renderRequestModal();
+}
+
+function previousRequestStep() {
+  if (state.requestWizard.step === 1) {
+    closeRequestModal();
+    return;
+  }
+  if (state.requestWizard.step === 4) {
+    closeRequestModal();
+    return;
+  }
+  state.requestWizard.step -= 1;
+  renderRequestModal();
+}
+
+async function nextRequestStep() {
+  try {
+    if (state.requestWizard.step === 1) {
+      if (!state.requestWizard.type) throw new Error('กรุณาเลือกประเภทคำร้อง');
+      state.requestWizard.step = 2;
+      renderRequestModal();
+      return;
+    }
+    if (state.requestWizard.step === 2) {
+      state.requestWizard.payload = collectRequestFormData();
+      state.requestWizard.step = 3;
+      renderRequestModal();
+      return;
+    }
+    if (state.requestWizard.step === 3) {
+      const signature = document.getElementById('ownerSignatureName').value.trim();
+      const accepted = document.getElementById('ownerSignatureConfirm').checked;
+      if (!signature) throw new Error('กรุณาพิมพ์ชื่อเพื่อเซ็นอิเล็กทรอนิกส์');
+      if (!accepted) throw new Error('กรุณายืนยันการเซ็นอิเล็กทรอนิกส์');
+      state.requestWizard.submitting = true;
+      renderRequestModal();
+      await api('createRequest', {
+        ...state.requestWizard.payload,
+        requestType: state.requestWizard.type,
+        ownerSignature: signature
+      });
+      await loadDashboard();
+      state.requestWizard.step = 4;
+      state.requestWizard.submitting = false;
+      renderRequestModal();
+      toast('ยื่นคำร้องแล้ว และส่งอีเมลแจ้งผู้เซ็นลำดับถัดไป');
+      return;
+    }
+    closeRequestModal();
+  } catch (error) {
+    state.requestWizard.submitting = false;
+    renderRequestModal();
+    toast(error.message, true);
+  }
+}
+
+function renderRequestModal() {
+  const step = state.requestWizard.step;
+  elements.requestStepText.textContent = `ขั้นตอนที่ ${Math.min(step, 4)}/4`;
+  elements.requestSteps.innerHTML = [1, 2, 3, 4].map(number => `
+    <span class="${number < step ? 'done' : ''} ${number === step ? 'active' : ''}">${number < step ? '✓' : number}</span>
+  `).join('');
+
+  if (step === 1) {
+    elements.requestModalBody.innerHTML = requestTypeStepMarkup();
+    elements.requestBackButton.textContent = 'ยกเลิก';
+    elements.requestNextButton.textContent = 'ถัดไป';
+  }
+  if (step === 2) {
+    elements.requestModalBody.innerHTML = requestFormStepMarkup();
+    elements.requestBackButton.textContent = 'ย้อนกลับ';
+    elements.requestNextButton.textContent = 'ถัดไป';
+    updateRequestCurrentBranch();
+  }
+  if (step === 3) {
+    elements.requestModalBody.innerHTML = requestSignatureStepMarkup();
+    elements.requestBackButton.textContent = 'ย้อนกลับ';
+    elements.requestNextButton.textContent = state.requestWizard.submitting ? 'กำลังส่งคำร้อง...' : 'ส่งคำร้องและเซ็น';
+  }
+  if (step === 4) {
+    elements.requestModalBody.innerHTML = `
+      <div class="request-success">
+        <strong>ส่งคำร้องเรียบร้อย</strong>
+        <span>ระบบบันทึกลายเซ็นของผู้ยื่นคำร้องแล้ว และแจ้งผู้เซ็นลำดับถัดไปทางอีเมล</span>
+      </div>
+    `;
+    elements.requestBackButton.textContent = 'ปิด';
+    elements.requestNextButton.textContent = 'เสร็จสิ้น';
+  }
+  elements.requestNextButton.disabled = state.requestWizard.submitting;
+}
+
+function requestTypeStepMarkup() {
+  const ordered = ['add_university_advisor', 'add_school_advisor', 'withdraw_advisor', 'project_name', 'project_branch', 'other'];
+  return `
+    <h3>เลือกประเภทคำร้องที่ต้องการยื่น</h3>
+    <div class="request-warning">
+      ขณะนี้ปิดรับคำร้องเพิ่ม/ถอดถอนอาจารย์ที่ปรึกษา คำร้องเปลี่ยนชื่อ เปลี่ยนสาขา และคำร้องอื่น ๆ ยังยื่นได้ตามปกติ
+    </div>
+    <div class="request-type-list">
+      ${ordered.map(type => {
+        const item = requestTypes[type];
+        return `
+          <button class="request-type-card ${state.requestWizard.type === type ? 'selected' : ''} ${item.disabled ? 'disabled' : ''}" type="button" data-request-type="${type}">
+            <span>${item.icon}</span>
+            <strong>${escapeHtml(item.label)}</strong>
+            <small>${escapeHtml(item.description)}</small>
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function requestFormStepMarkup() {
+  const type = state.requestWizard.type;
+  const payload = state.requestWizard.payload || {};
+  const projects = state.dashboard?.projects || [];
+  const selectedProjectId = payload.projectId || projects[0]?.projectId || '';
+  return `
+    <div class="request-selected-type">
+      <span>${requestTypes[type]?.icon || '📝'}</span>
+      <strong>${escapeHtml(requestTypeLabel(type))}</strong>
+    </div>
+    <label class="full-field">
+      โครงงาน
+      <select id="requestProjectId" required>
+        ${projects.map(project => `
+          <option value="${escapeAttribute(project.projectId)}" ${project.projectId === selectedProjectId ? 'selected' : ''}>
+            ${escapeHtml(project.projectId)} — ${escapeHtml(project.title || project.projectId)}
+          </option>
+        `).join('')}
+      </select>
+    </label>
+    <div class="request-owner-grid">
+      <strong>ข้อมูลผู้ยื่นคำร้อง</strong>
+      <label>คำนำหน้า * <input id="requestPrefix" value="${escapeAttribute(payload.prefix || '')}" placeholder="เช่น นาย / นางสาว" required></label>
+      <label>รุ่น วมว. * <input id="requestClassLevel" value="${escapeAttribute(payload.classLevel || '')}" placeholder="เช่น 15" required></label>
+      <label>เบอร์ติดต่อ * <input id="requestPhone" value="${escapeAttribute(payload.phone || '')}" placeholder="0818834211" required></label>
+    </div>
+    ${requestDynamicFieldsMarkup(type, payload, selectedProjectId)}
+  `;
+}
+
+function requestDynamicFieldsMarkup(type, payload, projectId) {
+  const project = (state.dashboard?.projects || []).find(item => item.projectId === projectId) || {};
+  if (type === 'project_name') {
+    return `
+      <label class="full-field">ชื่อโครงงานใหม่ (ภาษาไทย)
+        <input id="requestNewTitleTh" value="${escapeAttribute(payload.newTitleTh || '')}" placeholder="ชื่อโครงงานภาษาไทย">
+      </label>
+      <label class="full-field">ชื่อโครงงานใหม่ (ภาษาอังกฤษ)
+        <input id="requestNewTitleEn" value="${escapeAttribute(payload.newTitleEn || '')}" placeholder="Project Name in English">
+      </label>
+      <label class="full-field">เหตุผล *
+        <textarea id="requestReason" rows="4" placeholder="ระบุเหตุผลในการขอเปลี่ยนชื่อ..." required>${escapeHtml(payload.reason || '')}</textarea>
+      </label>
+    `;
+  }
+  if (type === 'project_branch') {
+    return `
+      <label class="full-field">สาขาปัจจุบัน (ดึงจากข้อมูลโครงงาน)
+        <input id="requestCurrentBranch" value="${escapeAttribute(project.school || '')}" readonly>
+      </label>
+      <label class="full-field">สาขาใหม่ *
+        <input id="requestNewBranch" value="${escapeAttribute(payload.newBranch || '')}" placeholder="สาขาวิชาที่ต้องการเปลี่ยน" required>
+      </label>
+      <label class="full-field">เหตุผล *
+        <textarea id="requestReason" rows="4" placeholder="ระบุเหตุผลในการขอเปลี่ยนสาขา..." required>${escapeHtml(payload.reason || '')}</textarea>
+      </label>
+    `;
+  }
+  return `
+    <label class="full-field">หัวข้อคำร้อง *
+      <input id="requestOtherSubject" value="${escapeAttribute(payload.otherSubject || '')}" placeholder="ระบุหัวข้อคำร้อง" required>
+    </label>
+    <label class="full-field">รายละเอียดคำร้อง *
+      <textarea id="requestOtherDetail" rows="5" placeholder="อธิบายรายละเอียดคำร้องและเหตุผล..." required>${escapeHtml(payload.otherDetail || '')}</textarea>
+    </label>
+  `;
+}
+
+function requestSignatureStepMarkup() {
+  const user = state.auth?.user || {};
+  return `
+    <div class="signature-panel">
+      <h3>เซ็นอิเล็กทรอนิกส์โดยผู้ยื่นคำร้อง</h3>
+      <p>เมื่อเซ็นแล้ว ระบบจะส่งอีเมลแจ้งผู้เซ็นลำดับถัดไป และแสดงคำร้องในเมนูคำร้องทั่วไป</p>
+      <div class="signature-flow">
+        <span>ผู้ยื่น</span><span>เพื่อน</span><span>อาจารย์หลัก</span><span>อาจารย์ร่วม</span><span>อาจารย์โรงเรียน</span><span>admin</span>
+      </div>
+      <label class="full-field">พิมพ์ชื่อ-สกุลเพื่อเซ็น *
+        <input id="ownerSignatureName" value="${escapeAttribute(user.name || '')}" required>
+      </label>
+      <label class="check-line">
+        <input id="ownerSignatureConfirm" type="checkbox">
+        <span>ข้าพเจ้าขอยืนยันว่าข้อมูลในคำร้องนี้ถูกต้อง และยอมรับการใช้ลายเซ็นอิเล็กทรอนิกส์</span>
+      </label>
+    </div>
+  `;
+}
+
+function collectRequestFormData() {
+  const type = state.requestWizard.type;
+  const payload = {
+    projectId: document.getElementById('requestProjectId').value,
+    prefix: document.getElementById('requestPrefix').value.trim(),
+    classLevel: document.getElementById('requestClassLevel').value.trim(),
+    phone: document.getElementById('requestPhone').value.trim()
+  };
+  if (!payload.projectId || !payload.prefix || !payload.classLevel || !payload.phone) {
+    throw new Error('กรุณากรอกข้อมูลผู้ยื่นคำร้องให้ครบ');
+  }
+  if (type === 'project_name') {
+    payload.newTitleTh = document.getElementById('requestNewTitleTh').value.trim();
+    payload.newTitleEn = document.getElementById('requestNewTitleEn').value.trim();
+    payload.reason = document.getElementById('requestReason').value.trim();
+    if (!payload.newTitleTh && !payload.newTitleEn) throw new Error('กรุณากรอกชื่อโครงงานใหม่');
+    if (!payload.reason) throw new Error('กรุณาระบุเหตุผล');
+  } else if (type === 'project_branch') {
+    payload.newBranch = document.getElementById('requestNewBranch').value.trim();
+    payload.reason = document.getElementById('requestReason').value.trim();
+    if (!payload.newBranch) throw new Error('กรุณากรอกสาขาใหม่');
+    if (!payload.reason) throw new Error('กรุณาระบุเหตุผล');
+  } else {
+    payload.otherSubject = document.getElementById('requestOtherSubject').value.trim();
+    payload.otherDetail = document.getElementById('requestOtherDetail').value.trim();
+    if (!payload.otherSubject || !payload.otherDetail) throw new Error('กรุณากรอกหัวข้อและรายละเอียดคำร้อง');
+  }
+  return payload;
+}
+
+function updateRequestCurrentBranch() {
+  const branchInput = document.getElementById('requestCurrentBranch');
+  const projectSelect = document.getElementById('requestProjectId');
+  if (!branchInput || !projectSelect) return;
+  const project = (state.dashboard?.projects || []).find(item => item.projectId === projectSelect.value);
+  branchInput.value = project?.school || '';
+}
+
+async function signRequest(requestId) {
+  const signature = window.prompt('พิมพ์ชื่อ-สกุลเพื่อเซ็นอิเล็กทรอนิกส์');
+  if (signature === null) return;
+  try {
+    await api('signRequest', { requestId, signature: signature.trim() });
+    toast('เซ็นคำร้องเรียบร้อย และแจ้งผู้เซ็นลำดับถัดไปแล้ว');
+    await loadDashboard();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function renderSubmitOptions(projects) {
   elements.submitProject.innerHTML = projects.map(project => `
     <option value="${escapeAttribute(project.projectId)}">${escapeHtml(project.projectId)} — ${escapeHtml(project.title || project.projectId)}</option>
@@ -449,6 +899,7 @@ function applyRoleVisibility(role) {
   document.querySelector('[data-view="submit"]').classList.toggle('hidden', !isStudent);
   document.querySelector('[data-view="review"]').classList.toggle('hidden', !isReviewer);
   document.querySelector('[data-view="admin"]').classList.toggle('hidden', !isAdmin);
+  elements.openRequestModalButton.classList.toggle('hidden', !isStudent);
 
   if ((state.view === 'submit' && !isStudent) || (state.view === 'review' && !isReviewer) || (state.view === 'admin' && !isAdmin)) {
     switchView('overview');
@@ -536,6 +987,13 @@ function renderLoadingShell() {
   elements.projectList.innerHTML = loadingState('กำลังโหลดโครงงานและทีมอาจารย์ที่ปรึกษา');
   elements.submissionList.innerHTML = loadingState('กำลังโหลดประวัติการส่งงาน');
   elements.reviewQueue.innerHTML = loadingState('กำลังโหลดรายการตรวจงาน');
+  elements.requestStatsGrid.innerHTML = [1, 2, 3, 4].map(() => `
+    <div class="request-stat-card skeleton-card">
+      <span></span>
+      <strong></strong>
+    </div>
+  `).join('');
+  elements.requestList.innerHTML = loadingState('กำลังโหลดรายการคำร้อง');
   renderSubmitOptions([]);
   applyRoleVisibility(user.role || 'student');
 }

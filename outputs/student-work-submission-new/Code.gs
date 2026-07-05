@@ -2,6 +2,7 @@ var SETTINGS = {
   spreadsheetId: PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '14Zs2kyIE8B3DpwvX78l8_IHqtQVYdWP6AZCaS_F0XRc',
   driveFolderId: PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID') || '1a2663IC5L_fkFE28AkUojDPVca8ITi8W',
   adminEmail: PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || 'admin@example.com',
+  webUrl: PropertiesService.getScriptProperties().getProperty('WEB_URL') || 'https://sciusnu-project.vercel.app',
   prefix: 'NEW_',
   appName: 'ProjectFlow'
 };
@@ -18,6 +19,10 @@ var SHEETS = {
   submissions: {
     name: 'Submissions',
     headers: ['submissionId', 'projectId', 'studentId', 'studentNames', 'title', 'workType', 'fileUrl', 'note', 'status', 'reviewerId', 'reviewerName', 'reviewerNote', 'createdAt', 'updatedAt', 'fileName', 'driveFileId']
+  },
+  requests: {
+    name: 'Requests',
+    headers: ['requestId', 'projectId', 'requesterId', 'requesterName', 'requestType', 'typeText', 'status', 'payload', 'signatures', 'currentSignerId', 'currentSignerName', 'currentSignerRole', 'createdAt', 'updatedAt', 'completedAt']
   },
   audit: {
     name: 'AuditLog',
@@ -71,6 +76,8 @@ function route_(request) {
   if (action === 'dashboard') return dashboard_(user);
   if (action === 'submitWork') return submitWork_(user, payload);
   if (action === 'reviewSubmission') return reviewSubmission_(user, payload);
+  if (action === 'createRequest') return createRequest_(user, payload);
+  if (action === 'signRequest') return signRequest_(user, payload);
   if (action === 'sendReminder') return sendReminder_(user, payload);
   if (action === 'createUser') return createUser_(user, payload);
   if (action === 'createProject') return createProject_(user, payload);
@@ -139,12 +146,16 @@ function dashboard_(user) {
   var reviewQueue = canReview ? submissions.filter(function (submission) {
     return ['ส่งแล้ว', 'รอตรวจ'].indexOf(String(submission.status || '')) !== -1;
   }) : [];
+  var requests = filterRequestsForUser_(readRows_(SHEETS.requests), user, projects, users);
+  var requestStats = requestStats_(requests);
 
   return {
     user: safeUser_(user),
     projects: projects,
     submissions: submissions,
     reviewQueue: reviewQueue,
+    requests: requests,
+    requestStats: requestStats,
     stats: {
       projects: projects.length,
       submitted: submissions.length,
@@ -232,6 +243,128 @@ function reviewSubmission_(user, payload) {
   notifyStudents_(project, submission, status, payload.note || '', user);
   audit_(user.userId, 'reviewSubmission', submission.submissionId + ' ' + status);
   return { submissionId: submission.submissionId, status: status };
+}
+
+function createRequest_(user, payload) {
+  if (user.role !== 'student') throw new Error('เฉพาะนักเรียนเท่านั้นที่ยื่นคำร้องได้');
+
+  var requestType = String(payload.requestType || '').trim();
+  if (['project_name', 'project_branch', 'other'].indexOf(requestType) === -1) {
+    throw new Error('กรุณาเลือกประเภทคำร้องที่เปิดใช้งาน');
+  }
+
+  var projects = readRows_(SHEETS.projects);
+  var project = projects.filter(function (item) { return item.projectId === payload.projectId; })[0];
+  if (!project) throw new Error('ไม่พบโครงงาน');
+
+  var studentKey = String(user.studentId || user.userId || '');
+  if (split_(project.studentIds).indexOf(studentKey) === -1) {
+    throw new Error('บัญชีนี้ไม่ได้อยู่ในโครงงานที่เลือก');
+  }
+
+  validateRequestPayload_(requestType, payload, project);
+
+  var now = new Date().toISOString();
+  var users = readRows_(SHEETS.users);
+  var signatures = buildRequestSigners_(project, user, users, now, payload.ownerSignature);
+  var nextSigner = nextUnsignedSigner_(signatures);
+  var requestPayload = {
+    prefix: payload.prefix || '',
+    classLevel: payload.classLevel || '',
+    phone: payload.phone || '',
+    newTitleTh: payload.newTitleTh || '',
+    newTitleEn: payload.newTitleEn || '',
+    currentBranch: project.school || '',
+    newBranch: payload.newBranch || '',
+    otherSubject: payload.otherSubject || '',
+    otherDetail: payload.otherDetail || '',
+    reason: payload.reason || ''
+  };
+  var request = {
+    requestId: 'REQ-' + Utilities.getUuid(),
+    projectId: project.projectId,
+    requesterId: studentKey,
+    requesterName: user.name,
+    requestType: requestType,
+    typeText: requestTypeText_(requestType),
+    status: nextSigner ? 'รอดำเนินการ' : 'อนุมัติแล้ว',
+    payload: JSON.stringify(requestPayload),
+    signatures: JSON.stringify(signatures),
+    currentSignerId: nextSigner ? nextSigner.userId : '',
+    currentSignerName: nextSigner ? nextSigner.name : '',
+    currentSignerRole: nextSigner ? nextSigner.role : '',
+    createdAt: now,
+    updatedAt: now,
+    completedAt: nextSigner ? '' : now
+  };
+
+  appendRow_(SHEETS.requests, request);
+  if (nextSigner) {
+    notifyRequestSigner_(request, nextSigner, project);
+  } else {
+    applyRequestEffect_(request, project);
+    notifyRequestCompleted_(request, project, users);
+  }
+  audit_(user.userId, 'createRequest', request.requestId + ' ' + request.typeText);
+  return enrichRequest_(request, project, user, users);
+}
+
+function signRequest_(user, payload) {
+  var requestId = String(payload.requestId || '').trim();
+  var signature = String(payload.signature || '').trim();
+  if (!requestId) throw new Error('ไม่พบเลขคำร้อง');
+  if (!signature) throw new Error('กรุณาพิมพ์ชื่อเพื่อเซ็นอิเล็กทรอนิกส์');
+
+  var requests = readRows_(SHEETS.requests);
+  var request = requests.filter(function (item) { return item.requestId === requestId; })[0];
+  if (!request) throw new Error('ไม่พบคำร้อง');
+  if (request.status !== 'รอดำเนินการ') throw new Error('คำร้องนี้ไม่ได้อยู่ในสถานะรอเซ็น');
+
+  var projects = readRows_(SHEETS.projects);
+  var project = projects.filter(function (item) { return item.projectId === request.projectId; })[0];
+  if (!project) throw new Error('ไม่พบโครงงานของคำร้องนี้');
+
+  var signatures = parseSignatures_(request.signatures);
+  var currentSigner = nextUnsignedSigner_(signatures);
+  if (!currentSigner) throw new Error('คำร้องนี้ไม่มีผู้รอเซ็น');
+  if (!signerMatchesUser_(currentSigner, user)) {
+    throw new Error('ยังไม่ถึงลำดับการเซ็นของบัญชีนี้');
+  }
+
+  var now = new Date().toISOString();
+  currentSigner.status = 'signed';
+  currentSigner.signedAt = now;
+  currentSigner.signature = signature;
+  currentSigner.signedBy = user.userId;
+  currentSigner.signedName = user.name;
+
+  var nextSigner = nextUnsignedSigner_(signatures);
+  var updates = {
+    signatures: JSON.stringify(signatures),
+    updatedAt: now
+  };
+  var users = readRows_(SHEETS.users);
+
+  if (nextSigner) {
+    updates.currentSignerId = nextSigner.userId;
+    updates.currentSignerName = nextSigner.name;
+    updates.currentSignerRole = nextSigner.role;
+    notifyRequestSigner_(request, nextSigner, project);
+  } else {
+    updates.status = 'อนุมัติแล้ว';
+    updates.currentSignerId = '';
+    updates.currentSignerName = '';
+    updates.currentSignerRole = '';
+    updates.completedAt = now;
+    request.status = updates.status;
+    request.signatures = updates.signatures;
+    applyRequestEffect_(request, project);
+    notifyRequestCompleted_(request, project, users);
+  }
+
+  updateRowById_(SHEETS.requests, 'requestId', request.requestId, updates);
+  audit_(user.userId, 'signRequest', request.requestId);
+  return { requestId: request.requestId, status: updates.status || request.status };
 }
 
 function sendReminder_(user) {
@@ -687,6 +820,265 @@ function sendStudentReminder_(project, submission) {
     count += 1;
   });
   return count;
+}
+
+function filterRequestsForUser_(requests, user, projects, users) {
+  var projectMap = {};
+  projects.forEach(function (project) {
+    projectMap[project.projectId] = project;
+  });
+
+  return requests.map(function (request) {
+    return enrichRequest_(request, projectMap[request.projectId] || {}, user, users);
+  }).filter(function (request) {
+    if (user.role === 'admin') return true;
+    if (String(request.requesterId) === String(user.studentId || user.userId || '')) return true;
+    return request.signaturesData.some(function (signer) {
+      return signerMatchesUser_(signer, user);
+    });
+  }).sort(function (a, b) {
+    return new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0);
+  });
+}
+
+function requestStats_(requests) {
+  return {
+    total: requests.length,
+    pending: requests.filter(function (request) { return request.status === 'รอดำเนินการ'; }).length,
+    approved: requests.filter(function (request) { return request.status === 'อนุมัติแล้ว'; }).length,
+    rejected: requests.filter(function (request) { return request.status === 'ปฏิเสธแล้ว'; }).length
+  };
+}
+
+function enrichRequest_(request, project, user, users) {
+  var payload = parseJson_(request.payload, {});
+  var signatures = parseSignatures_(request.signatures);
+  var currentSigner = nextUnsignedSigner_(signatures);
+  var signedCount = signatures.filter(function (signer) { return signer.status === 'signed'; }).length;
+  request.payloadData = payload;
+  request.signaturesData = signatures;
+  request.projectTitle = project.title || request.projectId;
+  request.projectCode = project.projectId || request.projectId;
+  request.currentBranch = project.school || payload.currentBranch || '';
+  request.typeText = request.typeText || requestTypeText_(request.requestType);
+  request.currentSignerName = currentSigner ? currentSigner.name : request.currentSignerName;
+  request.currentSignerRole = currentSigner ? currentSigner.role : request.currentSignerRole;
+  request.canSign = request.status === 'รอดำเนินการ' && currentSigner && signerMatchesUser_(currentSigner, user);
+  request.progressText = signedCount + '/' + signatures.length;
+  request.nextSignerLabel = currentSigner ? currentSigner.label : '';
+  return request;
+}
+
+function validateRequestPayload_(requestType, payload, project) {
+  if (!payload.projectId) throw new Error('กรุณาเลือกโครงงาน');
+  if (!payload.prefix || !payload.classLevel || !payload.phone) {
+    throw new Error('กรุณากรอกข้อมูลผู้ยื่นคำร้องให้ครบ');
+  }
+  if (requestType === 'project_name') {
+    if (!payload.newTitleTh && !payload.newTitleEn) throw new Error('กรุณากรอกชื่อโครงงานใหม่');
+    if (!payload.reason) throw new Error('กรุณาระบุเหตุผล');
+  }
+  if (requestType === 'project_branch') {
+    if (!payload.newBranch) throw new Error('กรุณากรอกสาขาใหม่');
+    if (String(payload.newBranch || '').trim() === String(project.school || '').trim()) {
+      throw new Error('สาขาใหม่ต้องไม่ซ้ำกับสาขาปัจจุบัน');
+    }
+    if (!payload.reason) throw new Error('กรุณาระบุเหตุผล');
+  }
+  if (requestType === 'other') {
+    if (!payload.otherSubject || !payload.otherDetail) throw new Error('กรุณากรอกหัวข้อและรายละเอียดคำร้อง');
+  }
+}
+
+function buildRequestSigners_(project, requester, users, now, ownerSignature) {
+  var signatures = [];
+  var seen = {};
+
+  function addSigner(role, label, account, fallbackName, fallbackEmail, fallbackStudentId, signed) {
+    var resolved = resolveSigner_(account, users, fallbackName, fallbackEmail, fallbackStudentId);
+    var key = signerIdentityKey_(resolved);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    signatures.push({
+      role: role,
+      label: label,
+      userId: resolved.userId || '',
+      email: resolved.email || '',
+      studentId: resolved.studentId || '',
+      name: resolved.name || fallbackName || resolved.userId || resolved.email || '',
+      status: signed ? 'signed' : 'pending',
+      signedAt: signed ? now : '',
+      signature: signed ? (ownerSignature || requester.name) : '',
+      signedBy: signed ? requester.userId : '',
+      signedName: signed ? requester.name : ''
+    });
+  }
+
+  addSigner('owner', 'ผู้ยื่นคำร้อง', requester.userId, requester.name, requester.email, requester.studentId, true);
+
+  var requesterKey = String(requester.studentId || requester.userId || '');
+  var studentIds = split_(project.studentIds);
+  var studentNames = split_(project.studentNames);
+  studentIds.forEach(function (studentId, index) {
+    if (String(studentId) === requesterKey) return;
+    addSigner('peer', 'เพื่อนร่วมโครงงาน', studentId, studentNames[index] || studentId, '', studentId, false);
+  });
+
+  addSigner('advisor', 'อาจารย์ที่ปรึกษาหลัก', project.advisorId, advisorName_(project.advisorId, users), '', '', false);
+  addSigner('co_advisor', 'อาจารย์ที่ปรึกษาร่วม', project.coAdvisorId, advisorName_(project.coAdvisorId, users), '', '', false);
+  addSigner('school_advisor', 'อาจารย์ที่ปรึกษาโรงเรียน', project.schoolAdvisorId, advisorName_(project.schoolAdvisorId, users), '', '', false);
+
+  var admin = findAdminUser_(users);
+  addSigner('admin', 'ผู้ดูแลระบบ', admin.userId, admin.name, admin.email, '', false);
+
+  return signatures;
+}
+
+function resolveSigner_(account, users, fallbackName, fallbackEmail, fallbackStudentId) {
+  var user = findUserInList_(users, account) || findUserInList_(users, fallbackStudentId) || findUserInList_(users, fallbackEmail);
+  if (user) {
+    return {
+      userId: user.userId || '',
+      email: user.email || '',
+      studentId: user.studentId || '',
+      name: user.name || fallbackName || user.userId || user.email || ''
+    };
+  }
+  return {
+    userId: account || fallbackStudentId || fallbackEmail || fallbackName || '',
+    email: fallbackEmail || '',
+    studentId: fallbackStudentId || '',
+    name: fallbackName || account || fallbackEmail || fallbackStudentId || ''
+  };
+}
+
+function findUserInList_(users, account) {
+  var key = String(account || '').trim().toLowerCase();
+  if (!key) return null;
+  return users.filter(function (user) {
+    return [user.userId, user.email, user.studentId].filter(Boolean).map(function (value) {
+      return String(value).trim().toLowerCase();
+    }).indexOf(key) !== -1;
+  })[0] || null;
+}
+
+function findAdminUser_(users) {
+  return users.filter(function (user) {
+    return user.role === 'admin' && isActive_(user);
+  })[0] || {
+    userId: SETTINGS.adminEmail,
+    email: SETTINGS.adminEmail,
+    name: 'ผู้ดูแลระบบ'
+  };
+}
+
+function signerIdentityKey_(signer) {
+  return String(signer.userId || signer.email || signer.studentId || signer.name || '').trim().toLowerCase();
+}
+
+function signerMatchesUser_(signer, user) {
+  if (signer.role === 'admin' && user.role === 'admin') return true;
+  var userKeys = [user.userId, user.email, user.studentId].filter(Boolean).map(function (value) {
+    return String(value).trim().toLowerCase();
+  });
+  var signerKeys = [signer.userId, signer.email, signer.studentId].filter(Boolean).map(function (value) {
+    return String(value).trim().toLowerCase();
+  });
+  return signerKeys.some(function (key) { return userKeys.indexOf(key) !== -1; });
+}
+
+function nextUnsignedSigner_(signatures) {
+  return signatures.filter(function (signer) {
+    return signer.status !== 'signed';
+  })[0] || null;
+}
+
+function parseSignatures_(value) {
+  var signatures = parseJson_(value, []);
+  return Array.isArray(signatures) ? signatures : [];
+}
+
+function parseJson_(value, fallback) {
+  if (!value) return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function requestTypeText_(type) {
+  var map = {
+    project_name: 'เปลี่ยนชื่อโครงงาน',
+    project_branch: 'เปลี่ยนสาขาโครงงาน',
+    other: 'คำร้องอื่น ๆ'
+  };
+  return map[type] || 'คำร้องทั่วไป';
+}
+
+function applyRequestEffect_(request, project) {
+  var payload = parseJson_(request.payload, {});
+  var now = new Date().toISOString();
+  if (request.requestType === 'project_name') {
+    var newTitle = buildProjectTitle_(payload);
+    if (newTitle) {
+      updateRowById_(SHEETS.projects, 'projectId', request.projectId, {
+        title: newTitle,
+        updatedAt: now
+      });
+    }
+  }
+  if (request.requestType === 'project_branch' && payload.newBranch) {
+    updateRowById_(SHEETS.projects, 'projectId', request.projectId, {
+      school: payload.newBranch,
+      updatedAt: now
+    });
+  }
+}
+
+function buildProjectTitle_(payload) {
+  var thai = String(payload.newTitleTh || '').trim();
+  var english = String(payload.newTitleEn || '').trim();
+  if (thai && english) return thai + ' / ' + english;
+  return thai || english || '';
+}
+
+function notifyRequestSigner_(request, signer, project) {
+  if (!signer.email) return;
+  var payload = parseJson_(request.payload, {});
+  var subject = '[' + SETTINGS.appName + '] คำร้องรอการเซ็น: ' + request.typeText;
+  var body = [
+    'เรียน ' + signer.name,
+    '',
+    'มีคำร้องออนไลน์รอการเซ็นอิเล็กทรอนิกส์',
+    'ประเภทคำร้อง: ' + request.typeText,
+    'โครงงาน: ' + (project.title || request.projectId),
+    'ผู้ยื่นคำร้อง: ' + request.requesterName,
+    'เหตุผล/รายละเอียด: ' + (payload.reason || payload.otherDetail || '-'),
+    '',
+    'กรุณาเข้าสู่ระบบเพื่อเซ็นคำร้อง:',
+    SETTINGS.webUrl
+  ].join('\n');
+  MailApp.sendEmail(signer.email, subject, body);
+}
+
+function notifyRequestCompleted_(request, project, users) {
+  var requester = findUserInList_(users, request.requesterId);
+  if (!requester || !requester.email) return;
+  MailApp.sendEmail(
+    requester.email,
+    '[' + SETTINGS.appName + '] คำร้องอนุมัติแล้ว: ' + request.typeText,
+    [
+      'เรียน ' + (requester.name || request.requesterName),
+      '',
+      'คำร้องของคุณได้รับการเซ็นครบทุกลำดับแล้ว',
+      'ประเภทคำร้อง: ' + request.typeText,
+      'โครงงาน: ' + (project.title || request.projectId),
+      '',
+      'ระบบได้ปรับข้อมูลที่เกี่ยวข้องให้อัตโนมัติแล้ว (หากเป็นคำร้องเปลี่ยนชื่อหรือสาขาโครงงาน)'
+    ].join('\n')
+  );
 }
 
 function enrichSubmission_(submission, projects) {
