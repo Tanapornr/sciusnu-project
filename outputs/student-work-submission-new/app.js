@@ -54,9 +54,9 @@ const elements = {
 };
 
 function boot() {
-  elements.demoNotice.textContent = isDemoMode()
-    ? 'โหมดตัวอย่างเปิดอยู่: ลองใช้ admin@example.com / admin123 หรือรหัสนักเรียน 68983244 / 1234 ได้ทันที'
-    : 'เชื่อมต่อ Google Apps Script แล้ว ข้อมูลจะถูกอ่าน/เขียนจาก Google Sheet ใหม่';
+  const demoMode = isDemoMode();
+  elements.demoNotice.textContent = demoMode ? 'โหมดทดสอบระบบ' : '';
+  elements.demoNotice.classList.toggle('hidden', !demoMode);
 
   state.auth = getAuth();
   bindEvents();
@@ -337,7 +337,7 @@ function renderProjects(projects) {
   }
 
   elements.projectList.innerHTML = projects.map(project => {
-    const branchLabel = projectBranchLabel(project);
+    const projectCode = String(project.projectId || '').trim();
     return `
     <article class="project-card">
       <div class="project-card-head">
@@ -352,7 +352,7 @@ function renderProjects(projects) {
         ${advisorBlock('อาจารย์ที่ปรึกษาโรงเรียน', project.schoolAdvisorName || project.schoolAdvisorId)}
       </div>
       <div class="meta-row">
-        ${branchLabel ? `<span class="pill branch-pill">สาขา ${escapeHtml(branchLabel)}</span>` : ''}
+        ${projectCode ? `<span class="pill project-id-pill">รหัสโครงงาน ${escapeHtml(projectCode)}</span>` : ''}
         ${project.dueDate ? `<span class="pill warning">กำหนด ${formatDate(project.dueDate)}</span>` : ''}
       </div>
     </article>
@@ -368,14 +368,6 @@ function advisorBlock(label, value) {
       <strong>${escapeHtml(name || 'ยังไม่ระบุ')}</strong>
     </div>
   `;
-}
-
-function projectBranchLabel(project) {
-  const projectId = String(project?.projectId || '').trim();
-  const segments = projectId.split('-').map(part => part.trim()).filter(Boolean);
-  if (segments.length >= 3) return segments[2].toUpperCase();
-  if (segments.length >= 2) return segments[1].toUpperCase();
-  return String(project?.branch || '').trim();
 }
 
 function renderSubmissions(submissions) {
@@ -507,7 +499,7 @@ function renderLoadingShell() {
   const user = state.auth?.user || {};
   elements.roleBadge.textContent = 'Loading';
   elements.workspaceTitle.textContent = 'กำลังโหลดข้อมูลของคุณ';
-  elements.workspaceSubtitle.textContent = 'กำลังเชื่อมต่อ Google Sheet และเตรียมพื้นที่ส่งโครงงาน';
+  elements.workspaceSubtitle.textContent = 'กำลังเตรียมข้อมูลการส่งโครงงาน';
   elements.userName.textContent = user.name || 'กำลังโหลด';
   elements.userEmail.textContent = user.email || user.userId || '-';
   elements.userInitial.textContent = (user.name || user.userId || 'U').trim().charAt(0).toUpperCase();
