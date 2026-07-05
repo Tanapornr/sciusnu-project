@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCIUSNU SMART | Advisor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <div class="brand-title">SCIUSNU SMART</div>
+        <div id="userLine" class="userline"></div>
+      </div>
+      <div class="actions">
+        <button id="refreshButton" class="btn-ghost" type="button">รีเฟรช</button>
+        <button type="button" onclick="logout()">ออกจากระบบ</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="toolbar">
+      <h1>ตรวจงานโครงงาน</h1>
+      <label style="min-width:260px;">
+        สถานะ
+        <select id="statusFilter">
+          <option value="">ทั้งหมด</option>
+          <option value="รอตรวจ">รอตรวจ</option>
+          <option value="รอการตรวจอนุมัติ">รอการตรวจอนุมัติ</option>
+          <option value="ไม่อนุมัติ">ไม่อนุมัติ</option>
+          <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
+        </select>
+      </label>
+    </section>
+
+    <section id="stats" class="stats"></section>
+
+    <section class="layout layout-main">
+      <div id="projectPanel" class="list"></div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">รายการส่งงาน</div>
+          <div id="quotaText" class="item-meta"></div>
+        </div>
+        <div id="submissionList" class="panel-body list"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script>
+    const auth = requireAuth(['advisor']);
+    let dashboard = null;
+
+    if (auth) {
+      setTopbarUser(auth.user);
+      loadDashboard();
+    }
+
+    document.getElementById('refreshButton').addEventListener('click', loadDashboard);
+    document.getElementById('statusFilter').addEventListener('change', renderSubmissions);
+    document.getElementById('submissionList').addEventListener('click', async event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) {
+        return;
+      }
+
+      const item = dashboard.submissions.find(submission => submission.id === button.dataset.id);
+      const note = document.querySelector('textarea[data-note-id="' + button.dataset.id + '"]').value;
+      await review(item.id, button.dataset.action, note, button);
+    });
+
+    async function loadDashboard() {
+      try {
+        dashboard = await api('dashboard', { token: auth.token });
+        setTopbarUser(dashboard.session);
+        renderStats(document.getElementById('stats'), dashboard.stats);
+        document.getElementById('quotaText').textContent = 'โควตาอีเมลวันนี้: ' + dashboard.emailQuota;
+        renderProjects();
+        renderSubmissions();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderProjects() {
+      document.getElementById('projectPanel').innerHTML = dashboard.projects.length
+        ? dashboard.projects.map(renderProjectCard).join('')
+        : '<div class="empty">ไม่พบโครงงานที่รับผิดชอบ</div>';
+    }
+
+    function renderSubmissions() {
+      const filter = document.getElementById('statusFilter').value;
+      const items = filter
+        ? dashboard.submissions.filter(item => item.status === filter)
+        : dashboard.submissions;
+
+      const node = document.getElementById('submissionList');
+      if (!items.length) {
+        node.innerHTML = '<div class="empty">ไม่พบรายการส่งงาน</div>';
+        return;
+      }
+
+      node.innerHTML = items.map(item => {
+        const canReview = item.status === 'รอตรวจ' || item.status === 'รอการตรวจอนุมัติ';
+        const reviewBox = canReview
+          ? '<div class="form-grid">' +
+            '<label>หมายเหตุ<textarea data-note-id="' + escapeAttr(item.id) + '">' + escapeHtml(item.note || '') + '</textarea></label>' +
+            '<div class="actions">' +
+            '<button class="btn-ok" type="button" data-action="approve" data-id="' + escapeAttr(item.id) + '">อนุมัติ</button>' +
+            '<button class="btn-danger" type="button" data-action="reject" data-id="' + escapeAttr(item.id) + '">ไม่อนุมัติ</button>' +
+            '</div>' +
+            '</div>'
+          : '';
+
+        return '<article class="item">' +
+          '<div class="item-head"><div><div class="item-title">' + escapeHtml(item.workType) + '</div>' +
+          '<div class="item-meta"><span>' + escapeHtml(item.id) + '</span><span>แก้ไขครั้งที่ ' + Number(item.revision || 0) + '</span></div></div>' +
+          statusBadge(item.status) + '</div>' +
+          submissionDetails(item) +
+          reviewBox +
+          '</article>';
+      }).join('');
+    }
+
+    async function review(submissionId, decision, note, button) {
+      setButtonBusy(button, true, 'กำลังบันทึก...');
+      try {
+        dashboard = await api('reviewSubmission', {
+          token: auth.token,
+          submissionId,
+          decision,
+          note
+        });
+        renderStats(document.getElementById('stats'), dashboard.stats);
+        renderSubmissions();
+        toast(decision === 'approve' ? 'อนุมัติเรียบร้อยแล้ว' : 'ส่งกลับให้แก้ไขเรียบร้อยแล้ว');
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        setButtonBusy(button, false, decision === 'approve' ? 'อนุมัติ' : 'ไม่อนุมัติ');
+      }
+    }
+  </script>
+</body>
+</html>

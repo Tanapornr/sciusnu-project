@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCIUSNU SMART | Student</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <div class="brand-title">SCIUSNU SMART</div>
+        <div id="userLine" class="userline"></div>
+      </div>
+      <div class="actions">
+        <button id="refreshButton" class="btn-ghost" type="button">รีเฟรช</button>
+        <button type="button" onclick="logout()">ออกจากระบบ</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="toolbar">
+      <h1>ส่งงานโครงงาน</h1>
+      <div id="quotaText" class="item-meta"></div>
+    </section>
+
+    <section id="stats" class="stats"></section>
+
+    <section class="layout layout-main">
+      <div id="projectPanel" class="list"></div>
+
+      <div class="list">
+        <section class="panel">
+          <div class="panel-header">
+            <div id="submissionTitle" class="panel-title">ส่งไฟล์งาน</div>
+            <button id="cancelEditButton" class="btn-ghost hidden" type="button">ยกเลิกส่งแก้ไข</button>
+          </div>
+          <form id="submissionForm" class="panel-body form-grid">
+            <input id="relatedSubmissionId" type="hidden">
+
+            <div class="form-split">
+              <label>
+                ประเภทงาน
+                <select id="workType" required></select>
+              </label>
+
+              <label>
+                เบอร์โทรศัพท์
+                <input id="phone">
+              </label>
+            </div>
+
+            <div class="form-split">
+              <label>
+                ไฟล์เล่ม PDF
+                <input id="pdfFile" type="file" accept="application/pdf,.pdf" required>
+              </label>
+
+              <label>
+                ไฟล์ลายเซ็น PDF ถ้ามี
+                <input id="signatureFile" type="file" accept="application/pdf,.pdf">
+              </label>
+            </div>
+
+            <label>
+              หมายเหตุ
+              <textarea id="note"></textarea>
+            </label>
+
+            <button id="submitButton" class="btn-primary" type="submit">ส่งงาน</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">ส่งแบบคำร้อง</div>
+          </div>
+          <form id="requestForm" class="panel-body form-grid">
+            <div class="form-split">
+              <label>
+                ประเภทคำร้อง
+                <select id="requestType" required></select>
+              </label>
+
+              <label>
+                ไฟล์คำร้อง PDF
+                <input id="requestFile" type="file" accept="application/pdf,.pdf" required>
+              </label>
+            </div>
+
+            <label>
+              หมายเหตุคำร้อง
+              <textarea id="requestNote"></textarea>
+            </label>
+
+            <button id="requestButton" class="btn-primary" type="submit">ส่งคำร้อง</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">ประวัติการส่งงาน</div>
+          </div>
+          <div id="submissionList" class="panel-body list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">ประวัติคำร้อง</div>
+          </div>
+          <div id="requestList" class="panel-body list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script>
+    const auth = requireAuth(['student']);
+    let dashboard = null;
+
+    if (auth) {
+      setTopbarUser(auth.user);
+      loadDashboard();
+    }
+
+    document.getElementById('refreshButton').addEventListener('click', loadDashboard);
+    document.getElementById('cancelEditButton').addEventListener('click', resetSubmissionForm);
+    document.getElementById('submissionForm').addEventListener('submit', submitProjectFile);
+    document.getElementById('requestForm').addEventListener('submit', submitRequest);
+    document.getElementById('submissionList').addEventListener('click', event => {
+      const button = event.target.closest('button[data-resubmit-id]');
+      if (!button) {
+        return;
+      }
+      startResubmit(button.dataset.resubmitId);
+    });
+
+    async function loadDashboard() {
+      try {
+        dashboard = await api('dashboard', { token: auth.token });
+        setTopbarUser(dashboard.session);
+        renderStats(document.getElementById('stats'), dashboard.stats);
+        renderProject();
+        fillSelect(document.getElementById('workType'), dashboard.workTypes, 'เลือกประเภทงาน');
+        fillSelect(document.getElementById('requestType'), dashboard.requestTypes, 'เลือกประเภทคำร้อง');
+        document.getElementById('quotaText').textContent = 'โควตาอีเมลวันนี้: ' + dashboard.emailQuota;
+        renderSubmissions();
+        renderRequests();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderProject() {
+      document.getElementById('projectPanel').innerHTML = dashboard.projects.length
+        ? dashboard.projects.map(renderProjectCard).join('')
+        : '<div class="empty">ไม่พบข้อมูลโครงงาน</div>';
+
+      const project = dashboard.projects[0];
+      if (project && project.students.length) {
+        const student = project.students.find(item => item.studentId === auth.user.studentId) || project.students[0];
+        document.getElementById('phone').value = student.phone || '';
+      }
+    }
+
+    function renderSubmissions() {
+      const node = document.getElementById('submissionList');
+      if (!dashboard.submissions.length) {
+        node.innerHTML = '<div class="empty">ยังไม่มีประวัติการส่งงาน</div>';
+        return;
+      }
+
+      node.innerHTML = dashboard.submissions.map(item => {
+        const resubmit = item.canResubmit
+          ? '<button type="button" data-resubmit-id="' + escapeAttr(item.id) + '">ส่งไฟล์แก้ไข</button>'
+          : '';
+
+        return '<article class="item">' +
+          '<div class="item-head"><div><div class="item-title">' + escapeHtml(item.workType) + '</div>' +
+          '<div class="item-meta"><span>' + escapeHtml(item.id) + '</span><span>แก้ไขครั้งที่ ' + Number(item.revision || 0) + '</span></div></div>' +
+          statusBadge(item.status) + '</div>' +
+          submissionDetails(item) +
+          '<div class="actions">' + resubmit + '</div>' +
+          '</article>';
+      }).join('');
+    }
+
+    function renderRequests() {
+      const node = document.getElementById('requestList');
+      if (!dashboard.requests.length) {
+        node.innerHTML = '<div class="empty">ยังไม่มีประวัติคำร้อง</div>';
+        return;
+      }
+
+      node.innerHTML = dashboard.requests.map(item => (
+        '<article class="item">' +
+        '<div class="item-head"><div><div class="item-title">' + escapeHtml(item.requestType) + '</div>' +
+        '<div class="item-meta"><span>' + escapeHtml(item.id) + '</span><span>' + escapeHtml(item.updatedAt || '-') + '</span></div></div>' +
+        statusBadge(item.status) + '</div>' +
+        '<dl class="detail-grid">' +
+        '<dt>ไฟล์คำร้อง</dt><dd>' + fileLink(item.fileUrl, 'เปิด PDF') + '</dd>' +
+        '<dt>หมายเหตุนักเรียน</dt><dd>' + escapeHtml(item.studentNote || '-') + '</dd>' +
+        '<dt>หมายเหตุแอดมิน</dt><dd>' + escapeHtml(item.adminNote || '-') + '</dd>' +
+        '</dl>' +
+        '</article>'
+      )).join('');
+    }
+
+    async function submitProjectFile(event) {
+      event.preventDefault();
+      const button = document.getElementById('submitButton');
+      setButtonBusy(button, true, 'กำลังอัปโหลด...');
+
+      try {
+        const pdfFile = await fileToPayload(document.getElementById('pdfFile'));
+        const signatureFile = await fileToPayload(document.getElementById('signatureFile'));
+
+        dashboard = await api('submitProjectFile', {
+          token: auth.token,
+          relatedSubmissionId: document.getElementById('relatedSubmissionId').value,
+          workType: document.getElementById('workType').value,
+          pdfFile,
+          signatureFile,
+          phone: document.getElementById('phone').value,
+          note: document.getElementById('note').value
+        });
+
+        resetSubmissionForm();
+        renderStats(document.getElementById('stats'), dashboard.stats);
+        renderSubmissions();
+        toast('ส่งงานเรียบร้อยแล้ว');
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        setButtonBusy(button, false, document.getElementById('relatedSubmissionId').value ? 'ส่งไฟล์แก้ไข' : 'ส่งงาน');
+      }
+    }
+
+    async function submitRequest(event) {
+      event.preventDefault();
+      const button = document.getElementById('requestButton');
+      setButtonBusy(button, true, 'กำลังอัปโหลด...');
+
+      try {
+        const requestFile = await fileToPayload(document.getElementById('requestFile'));
+        dashboard = await api('submitRequest', {
+          token: auth.token,
+          requestType: document.getElementById('requestType').value,
+          requestFile,
+          note: document.getElementById('requestNote').value
+        });
+
+        document.getElementById('requestForm').reset();
+        renderRequests();
+        toast('ส่งคำร้องเรียบร้อยแล้ว');
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        setButtonBusy(button, false, 'ส่งคำร้อง');
+      }
+    }
+
+    function startResubmit(submissionId) {
+      const item = dashboard.submissions.find(submission => submission.id === submissionId);
+      if (!item) {
+        return;
+      }
+      document.getElementById('relatedSubmissionId').value = item.id;
+      document.getElementById('workType').value = item.workType;
+      document.getElementById('workType').disabled = true;
+      document.getElementById('note').value = item.note || '';
+      document.getElementById('submissionTitle').textContent = 'ส่งไฟล์แก้ไข';
+      document.getElementById('submitButton').textContent = 'ส่งไฟล์แก้ไข';
+      document.getElementById('cancelEditButton').classList.remove('hidden');
+      document.getElementById('submissionForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function resetSubmissionForm() {
+      document.getElementById('submissionForm').reset();
+      document.getElementById('relatedSubmissionId').value = '';
+      document.getElementById('workType').disabled = false;
+      document.getElementById('submissionTitle').textContent = 'ส่งไฟล์งาน';
+      document.getElementById('submitButton').textContent = 'ส่งงาน';
+      document.getElementById('cancelEditButton').classList.add('hidden');
+    }
+  </script>
+</body>
+</html>

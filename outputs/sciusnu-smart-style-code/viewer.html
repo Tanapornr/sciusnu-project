@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCIUSNU SMART | Viewer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <div class="brand-title">SCIUSNU SMART</div>
+        <div id="userLine" class="userline"></div>
+      </div>
+      <div class="actions">
+        <button id="refreshButton" class="btn-ghost" type="button">รีเฟรช</button>
+        <button type="button" onclick="logout()">ออกจากระบบ</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="toolbar">
+      <h1>ติดตามสถานะโครงงาน</h1>
+      <label style="min-width:260px;">
+        รหัสโครงงาน
+        <select id="projectFilter"></select>
+      </label>
+    </section>
+
+    <section id="stats" class="stats"></section>
+
+    <section class="layout layout-main">
+      <div id="projectPanel" class="list"></div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">รายการส่งงาน</div>
+        </div>
+        <div id="submissionList" class="panel-body list"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script>
+    const auth = requireAuth(['viewer']);
+    let dashboard = null;
+
+    if (auth) {
+      setTopbarUser(auth.user);
+      loadDashboard();
+    }
+
+    document.getElementById('refreshButton').addEventListener('click', loadDashboard);
+    document.getElementById('projectFilter').addEventListener('change', renderAll);
+
+    async function loadDashboard() {
+      try {
+        dashboard = await api('dashboard', { token: auth.token });
+        setTopbarUser(dashboard.session);
+        renderStats(document.getElementById('stats'), dashboard.stats);
+        renderProjectFilter();
+        renderAll();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderProjectFilter() {
+      const filter = document.getElementById('projectFilter');
+      const current = filter.value;
+      filter.innerHTML = '<option value="">ทุกโครงงาน</option>' + dashboard.projects.map(project =>
+        '<option value="' + escapeAttr(project.projectCode) + '">' + escapeHtml(project.projectCode) + '</option>'
+      ).join('');
+      if (dashboard.projects.some(project => project.projectCode === current)) {
+        filter.value = current;
+      }
+    }
+
+    function renderAll() {
+      renderProjects();
+      renderSubmissions();
+    }
+
+    function currentProjectCode() {
+      return document.getElementById('projectFilter').value;
+    }
+
+    function renderProjects() {
+      const code = currentProjectCode();
+      const projects = code
+        ? dashboard.projects.filter(project => project.projectCode === code)
+        : dashboard.projects;
+
+      document.getElementById('projectPanel').innerHTML = projects.length
+        ? projects.map(renderProjectCard).join('')
+        : '<div class="empty">ไม่พบโครงงาน</div>';
+    }
+
+    function renderSubmissions() {
+      const code = currentProjectCode();
+      const items = code
+        ? dashboard.submissions.filter(item => item.projectCode === code)
+        : dashboard.submissions;
+
+      const node = document.getElementById('submissionList');
+      if (!items.length) {
+        node.innerHTML = '<div class="empty">ยังไม่มีรายการส่งงาน</div>';
+        return;
+      }
+
+      node.innerHTML = items.map(item => (
+        '<article class="item">' +
+        '<div class="item-head"><div><div class="item-title">' + escapeHtml(item.workType) + '</div>' +
+        '<div class="item-meta"><span>' + escapeHtml(item.id) + '</span><span>' + escapeHtml(item.updatedAt || '-') + '</span></div></div>' +
+        statusBadge(item.status) + '</div>' +
+        submissionDetails(item) +
+        '</article>'
+      )).join('');
+    }
+  </script>
+</body>
+</html>

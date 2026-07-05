@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCIUSNU SMART | Login</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="login-shell">
+    <form id="loginForm" class="login-panel">
+      <div>
+        <div class="brand-title">SCIUSNU SMART</div>
+        <div class="brand-subtitle">ระบบส่งและติดตามงานโครงงานนักเรียน</div>
+      </div>
+
+      <label>
+        บัญชีผู้ใช้
+        <input id="account" autocomplete="username" required placeholder="รหัสนักเรียน หรืออีเมล">
+      </label>
+
+      <label>
+        รหัสผ่าน
+        <input id="password" type="password" autocomplete="current-password" required>
+      </label>
+
+      <button id="loginButton" class="btn-primary" type="submit">เข้าสู่ระบบ</button>
+    </form>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script>
+    const loginForm = document.getElementById('loginForm');
+    const loginButton = document.getElementById('loginButton');
+
+    loginForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      setButtonBusy(loginButton, true, 'กำลังเข้าสู่ระบบ...');
+
+      try {
+        const result = await api('login', {
+          account: document.getElementById('account').value,
+          password: document.getElementById('password').value
+        });
+
+        saveAuth({
+          token: result.token,
+          user: result.user
+        });
+        window.location.href = result.page;
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        setButtonBusy(loginButton, false, 'เข้าสู่ระบบ');
+      }
+    });
+  </script>
+</body>
+</html>
