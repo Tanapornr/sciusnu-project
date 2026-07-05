@@ -38,15 +38,18 @@ const elements = {
   submitProject: document.getElementById('submitProject'),
   submitForm: document.getElementById('submitForm'),
   submitButton: document.getElementById('submitButton'),
+  submissionFile: document.getElementById('submissionFile'),
   reminderButton: document.getElementById('reminderButton'),
   userForm: document.getElementById('userForm'),
   projectForm: document.getElementById('projectForm'),
+  generateAccountsButton: document.getElementById('generateAccountsButton'),
+  generatedCredential: document.getElementById('generatedCredential'),
   toast: document.getElementById('toast')
 };
 
 function boot() {
   elements.demoNotice.textContent = isDemoMode()
-    ? 'โหมดตัวอย่างเปิดอยู่: ลองใช้ admin / admin123 หรือรหัสนักเรียน 68983244 / demo123 ได้ทันที'
+    ? 'โหมดตัวอย่างเปิดอยู่: ลองใช้ admin@example.com / admin123 หรือรหัสนักเรียน 68983244 / demo123 ได้ทันที'
     : 'เชื่อมต่อ Google Apps Script แล้ว ข้อมูลจะถูกอ่าน/เขียนจาก Google Sheet ใหม่';
 
   state.auth = getAuth();
@@ -65,6 +68,7 @@ function bindEvents() {
   elements.reminderButton.addEventListener('click', handleReminder);
   elements.userForm.addEventListener('submit', handleCreateUser);
   elements.projectForm.addEventListener('submit', handleCreateProject);
+  elements.generateAccountsButton.addEventListener('click', handleGenerateStudentAccounts);
 
   document.querySelectorAll('.nav-item').forEach(button => {
     button.addEventListener('click', () => switchView(button.dataset.view));
@@ -114,12 +118,18 @@ async function handleSubmitWork(event) {
   setBusy(elements.submitButton, true, 'กำลังส่งงาน...');
 
   try {
+    const selectedFile = elements.submissionFile.files[0];
+    const filePayload = selectedFile ? await readFilePayload(selectedFile) : {};
+    const fileUrl = document.getElementById('fileUrl').value.trim();
+    if (!selectedFile && !fileUrl) throw new Error('กรุณาอัปโหลดไฟล์หรือใส่ลิงก์ไฟล์งาน');
+
     await api('submitWork', {
       projectId: elements.submitProject.value,
       workType: document.getElementById('workType').value,
       title: document.getElementById('submissionTitle').value.trim(),
-      fileUrl: document.getElementById('fileUrl').value.trim(),
-      note: document.getElementById('studentNote').value.trim()
+      fileUrl,
+      note: document.getElementById('studentNote').value.trim(),
+      ...filePayload
     });
     elements.submitForm.reset();
     toast('ส่งงานเรียบร้อยและแจ้งอาจารย์ทางอีเมลแล้ว');
@@ -157,7 +167,7 @@ async function handleReminder() {
 async function handleCreateUser(event) {
   event.preventDefault();
   try {
-    await api('createUser', {
+    const result = await api('createUser', {
       userId: document.getElementById('newUserId').value.trim(),
       password: document.getElementById('newPassword').value,
       role: document.getElementById('newRole').value,
@@ -167,7 +177,19 @@ async function handleCreateUser(event) {
       school: document.getElementById('newSchool').value.trim()
     });
     elements.userForm.reset();
-    toast('เพิ่มผู้ใช้งานแล้ว');
+    renderCredentials(result.credentials ? [result.credentials] : []);
+    toast(result.credentials?.generated ? 'เพิ่มผู้ใช้งานและ Gen Password แล้ว' : 'เพิ่มผู้ใช้งานแล้ว');
+    await loadDashboard();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleGenerateStudentAccounts() {
+  try {
+    const result = await api('generateStudentAccounts', {});
+    renderCredentials(result.credentials || []);
+    toast(`Gen Password นักเรียนแล้ว ${result.credentials?.length || 0} บัญชี`);
     await loadDashboard();
   } catch (error) {
     toast(error.message, true);
@@ -185,6 +207,7 @@ async function handleCreateProject(event) {
       advisorId: document.getElementById('newAdvisorId').value.trim(),
       coAdvisorId: document.getElementById('newCoAdvisorId').value.trim(),
       schoolAdvisorId: document.getElementById('newSchoolAdvisorId').value.trim(),
+      school: document.getElementById('newProjectSchool').value.trim(),
       dueDate: document.getElementById('newDueDate').value
     });
     elements.projectForm.reset();
@@ -193,6 +216,26 @@ async function handleCreateProject(event) {
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+function renderCredentials(credentials) {
+  if (!credentials.length) {
+    elements.generatedCredential.classList.add('hidden');
+    elements.generatedCredential.innerHTML = '';
+    return;
+  }
+
+  elements.generatedCredential.classList.remove('hidden');
+  elements.generatedCredential.innerHTML = `
+    <strong>บัญชีที่สร้างล่าสุด</strong>
+    ${credentials.map(item => `
+      <div>
+        ${escapeHtml(item.name || item.userId)}:
+        USER <code>${escapeHtml(item.userId)}</code>
+        PASS <code>${escapeHtml(item.password)}</code>
+      </div>
+    `).join('')}
+  `;
 }
 
 function render() {
@@ -342,6 +385,22 @@ async function api(action, payload = {}) {
   return data.data || {};
 }
 
+function readFilePayload(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve({
+        fileName: file.name,
+        fileMimeType: file.type || 'application/octet-stream',
+        fileData: result.includes(',') ? result.split(',').pop() : result
+      });
+    };
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function isDemoMode() {
   return CONFIG.DEMO_MODE || !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.includes('PASTE_');
 }
@@ -435,9 +494,9 @@ function getDemoStore() {
   const now = new Date().toISOString();
   const data = {
     users: [
-      { userId: 'admin', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com' },
+      { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com' },
       { userId: '68983244', password: 'demo123', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง' },
-      { userId: 'advisor01', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
+      { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
     ],
     projects: [
       {
@@ -445,7 +504,7 @@ function getDemoStore() {
         title: 'ระบบแจ้งเตือนคุณภาพน้ำด้วย IoT',
         studentIds: '68983244',
         studentNames: 'ณภัทร ใจดี',
-        advisorId: 'advisor01',
+        advisorId: 'advisor@example.com',
         coAdvisorId: '',
         schoolAdvisorId: '',
         dueDate: '2026-08-15',
@@ -497,12 +556,13 @@ async function demoApi(action, payload) {
   if (action === 'submitWork') {
     const project = store.projects.find(item => item.projectId === payload.projectId);
     const now = new Date().toISOString();
+    const fileUrl = payload.fileUrl || (payload.fileName ? `https://drive.google.com/demo/${encodeURIComponent(payload.fileName)}` : '');
     store.submissions.unshift({
       submissionId: `S-${Date.now()}`,
       projectId: payload.projectId,
       title: payload.title,
       workType: payload.workType,
-      fileUrl: payload.fileUrl,
+      fileUrl,
       note: payload.note,
       status: 'ส่งแล้ว',
       studentId: state.auth.user.studentId || state.auth.user.userId,
@@ -530,10 +590,44 @@ async function demoApi(action, payload) {
   }
 
   if (action === 'createUser') {
-    if (store.users.some(item => item.userId === payload.userId)) throw new Error('มีรหัสผู้ใช้นี้แล้ว');
-    store.users.push(payload);
+    const normalized = normalizeNewUser(payload);
+    if (findDemoUser(store, normalized.userId) || findDemoUser(store, normalized.email) || findDemoUser(store, normalized.studentId)) throw new Error('มีบัญชีนี้แล้ว');
+    store.users.push(normalized);
     setDemoStore(store);
-    return { ok: true };
+    return {
+      credentials: {
+        userId: normalized.userId,
+        password: normalized.password,
+        name: normalized.name,
+        generated: normalized.generated
+      }
+    };
+  }
+
+  if (action === 'generateStudentAccounts') {
+    const credentials = [];
+    store.projects.forEach(project => {
+      const ids = splitValues(project.studentIds);
+      const names = splitValues(project.studentNames);
+      ids.forEach((studentId, index) => {
+        if (findDemoUser(store, studentId)) return;
+        const password = generateDemoPassword();
+        const user = {
+          userId: studentId,
+          password,
+          role: 'student',
+          name: names[index] || studentId,
+          email: '',
+          studentId,
+          school: project.school || '',
+          generated: true
+        };
+        store.users.push(user);
+        credentials.push({ userId: studentId, password, name: user.name, generated: true });
+      });
+    });
+    setDemoStore(store);
+    return { credentials };
   }
 
   if (action === 'createProject') {
@@ -544,6 +638,45 @@ async function demoApi(action, payload) {
   }
 
   throw new Error('ยังไม่รองรับคำสั่งนี้');
+}
+
+function normalizeNewUser(payload) {
+  const role = payload.role || 'student';
+  const generated = !payload.password;
+  const password = payload.password || generateDemoPassword();
+  const email = String(payload.email || '').trim();
+  const studentId = String(payload.studentId || '').trim();
+
+  if (role === 'student') {
+    if (!studentId && !payload.userId) throw new Error('นักเรียนต้องมีรหัสนักเรียน');
+    return {
+      ...payload,
+      userId: studentId || payload.userId,
+      studentId: studentId || payload.userId,
+      password,
+      generated
+    };
+  }
+
+  if (!email && !payload.userId) throw new Error('admin/อาจารย์ต้องใช้อีเมลเป็น USER');
+  return {
+    ...payload,
+    userId: email || payload.userId,
+    email: email || payload.userId,
+    password,
+    generated
+  };
+}
+
+function findDemoUser(store, account) {
+  const key = String(account || '').trim().toLowerCase();
+  if (!key) return null;
+  return store.users.find(item => [item.userId, item.email, item.studentId].filter(Boolean).map(String).map(value => value.toLowerCase()).includes(key)) || null;
+}
+
+function generateDemoPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 }
 
 function demoDashboard(store, user) {

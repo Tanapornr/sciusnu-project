@@ -253,6 +253,26 @@ a {
   line-height: 1.6;
 }
 
+.credential-box {
+  overflow: auto;
+  max-height: 260px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  color: #134e4a;
+  background: rgba(20, 184, 166, 0.1);
+  line-height: 1.7;
+}
+
+.credential-box code {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 0.1rem 0.42rem;
+  background: rgba(255, 255, 255, 0.75);
+  color: #0f172a;
+  font-weight: 900;
+}
+
 .app-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);

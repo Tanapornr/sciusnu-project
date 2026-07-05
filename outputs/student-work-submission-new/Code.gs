@@ -1,5 +1,7 @@
 var SETTINGS = {
   spreadsheetId: PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '14Zs2kyIE8B3DpwvX78l8_IHqtQVYdWP6AZCaS_F0XRc',
+  driveFolderId: PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID') || '1a2663IC5L_fkFE28AkUojDPVca8ITi8W',
+  adminEmail: PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || 'admin@example.com',
   prefix: 'NEW_',
   appName: 'ProjectFlow'
 };
@@ -15,7 +17,7 @@ var SHEETS = {
   },
   submissions: {
     name: 'Submissions',
-    headers: ['submissionId', 'projectId', 'studentId', 'studentNames', 'title', 'workType', 'fileUrl', 'note', 'status', 'reviewerId', 'reviewerName', 'reviewerNote', 'createdAt', 'updatedAt']
+    headers: ['submissionId', 'projectId', 'studentId', 'studentNames', 'title', 'workType', 'fileUrl', 'note', 'status', 'reviewerId', 'reviewerName', 'reviewerNote', 'createdAt', 'updatedAt', 'fileName', 'driveFileId']
   },
   audit: {
     name: 'AuditLog',
@@ -59,6 +61,7 @@ function route_(request) {
   if (action === 'sendReminder') return sendReminder_(user, payload);
   if (action === 'createUser') return createUser_(user, payload);
   if (action === 'createProject') return createProject_(user, payload);
+  if (action === 'generateStudentAccounts') return generateStudentAccounts_(user);
 
   throw new Error('ไม่พบคำสั่งที่ต้องการ');
 }
@@ -124,11 +127,11 @@ function submitWork_(user, payload) {
     throw new Error('บัญชีนี้ไม่ได้อยู่ในโครงงานที่เลือก');
   }
 
-  if (!payload.title || !payload.fileUrl) {
-    throw new Error('กรุณากรอกชื่องานและลิงก์ไฟล์งาน');
-  }
+  if (!payload.title) throw new Error('กรุณากรอกชื่องาน');
+  if (!payload.fileUrl && !payload.fileData) throw new Error('กรุณาอัปโหลดไฟล์หรือแนบลิงก์ไฟล์งาน');
 
   var now = new Date().toISOString();
+  var storedFile = payload.fileData ? storeSubmissionFile_(project, payload, user) : null;
   var submission = {
     submissionId: 'SUB-' + Utilities.getUuid(),
     projectId: project.projectId,
@@ -136,7 +139,9 @@ function submitWork_(user, payload) {
     studentNames: user.name,
     title: payload.title,
     workType: payload.workType || 'ส่งงาน',
-    fileUrl: payload.fileUrl,
+    fileUrl: storedFile ? storedFile.url : payload.fileUrl,
+    fileName: storedFile ? storedFile.name : '',
+    driveFileId: storedFile ? storedFile.id : '',
     note: payload.note || '',
     status: 'ส่งแล้ว',
     reviewerId: '',
@@ -211,26 +216,33 @@ function sendReminder_(user) {
 
 function createUser_(user, payload) {
   requireAdmin_(user);
-  if (!payload.userId || !payload.password || !payload.role || !payload.name) {
-    throw new Error('กรุณากรอกข้อมูลผู้ใช้งานให้ครบ');
-  }
-  if (findUser_(payload.userId)) throw new Error('มีรหัสผู้ใช้นี้แล้ว');
+  var normalized = normalizeNewUser_(payload);
+  if (findUser_(normalized.userId) || findUser_(normalized.email) || findUser_(normalized.studentId)) throw new Error('มีบัญชีนี้แล้ว');
 
   var now = new Date().toISOString();
   appendRow_(SHEETS.users, {
-    userId: payload.userId,
-    password: payload.password,
-    role: payload.role,
-    name: payload.name,
-    email: payload.email || '',
-    studentId: payload.studentId || '',
-    school: payload.school || '',
+    userId: normalized.userId,
+    password: normalized.password,
+    role: normalized.role,
+    name: normalized.name,
+    email: normalized.email || '',
+    studentId: normalized.studentId || '',
+    school: normalized.school || '',
     active: 'TRUE',
     createdAt: now,
     updatedAt: now
   });
-  audit_(user.userId, 'createUser', payload.userId);
-  return { userId: payload.userId };
+  sendCredentialEmail_(normalized);
+  audit_(user.userId, 'createUser', normalized.userId);
+  return {
+    userId: normalized.userId,
+    credentials: {
+      userId: normalized.userId,
+      password: normalized.password,
+      name: normalized.name,
+      generated: normalized.generated
+    }
+  };
 }
 
 function createProject_(user, payload) {
@@ -260,11 +272,129 @@ function createProject_(user, payload) {
   return { projectId: payload.projectId };
 }
 
+function generateStudentAccounts_(user) {
+  requireAdmin_(user);
+  var projects = readRows_(SHEETS.projects);
+  var credentials = [];
+
+  projects.forEach(function (project) {
+    var ids = split_(project.studentIds);
+    var names = split_(project.studentNames);
+    ids.forEach(function (studentId, index) {
+      if (findUser_(studentId)) return;
+      var password = generatePassword_();
+      var student = {
+        userId: studentId,
+        password: password,
+        role: 'student',
+        name: names[index] || studentId,
+        email: '',
+        studentId: studentId,
+        school: project.school || '',
+        active: 'TRUE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      appendRow_(SHEETS.users, student);
+      credentials.push({
+        userId: student.userId,
+        password: password,
+        name: student.name,
+        generated: true
+      });
+    });
+  });
+
+  audit_(user.userId, 'generateStudentAccounts', String(credentials.length));
+  return { credentials: credentials };
+}
+
+function normalizeNewUser_(payload) {
+  var role = payload.role || 'student';
+  var password = payload.password || generatePassword_();
+  var generated = !payload.password;
+  var email = String(payload.email || '').trim();
+  var studentId = String(payload.studentId || '').trim();
+
+  if (!payload.name) throw new Error('กรุณากรอกชื่อ-สกุล');
+
+  if (role === 'student') {
+    var studentUser = studentId || String(payload.userId || '').trim();
+    if (!studentUser) throw new Error('นักเรียนต้องมีรหัสนักเรียน');
+    return {
+      userId: studentUser,
+      password: password,
+      role: role,
+      name: payload.name,
+      email: email,
+      studentId: studentUser,
+      school: payload.school || '',
+      generated: generated
+    };
+  }
+
+  var staffUser = email || String(payload.userId || '').trim();
+  if (!staffUser) throw new Error('admin/อาจารย์ต้องใช้อีเมลเป็น USER');
+  return {
+    userId: staffUser,
+    password: password,
+    role: role,
+    name: payload.name,
+    email: staffUser,
+    studentId: '',
+    school: payload.school || '',
+    generated: generated
+  };
+}
+
+function storeSubmissionFile_(project, payload, user) {
+  var root = DriveApp.getFolderById(SETTINGS.driveFolderId);
+  var projectFolder = getOrCreateFolder_(root, sanitizeFileName_(project.projectId + ' - ' + project.title));
+  var bytes = Utilities.base64Decode(payload.fileData);
+  var originalName = payload.fileName || 'submission-file';
+  var safeName = sanitizeFileName_(project.projectId + ' - ' + payload.title + ' - ' + originalName);
+  var blob = Utilities.newBlob(bytes, payload.fileMimeType || 'application/octet-stream', safeName);
+  var file = projectFolder.createFile(blob);
+  file.setDescription('Uploaded by ' + user.name + ' via ' + SETTINGS.appName);
+  return {
+    id: file.getId(),
+    name: file.getName(),
+    url: file.getUrl()
+  };
+}
+
+function getOrCreateFolder_(parent, name) {
+  var folders = parent.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return parent.createFolder(name);
+}
+
+function sanitizeFileName_(value) {
+  return String(value || 'file').replace(/[\\/:*?"<>|#%{}~&]/g, '-').slice(0, 160);
+}
+
+function sendCredentialEmail_(user) {
+  if (!user.email) return;
+  MailApp.sendEmail(
+    user.email,
+    '[' + SETTINGS.appName + '] ข้อมูลเข้าสู่ระบบ',
+    [
+      'เรียน ' + user.name,
+      '',
+      'บัญชีของคุณถูกสร้างในระบบ ' + SETTINGS.appName,
+      'USER: ' + user.userId,
+      'PASSWORD: ' + user.password,
+      '',
+      'กรุณาเก็บรหัสผ่านนี้ไว้เป็นความลับ'
+    ].join('\n')
+  );
+}
+
 function notifyReviewers_(project, submission) {
   var users = readRows_(SHEETS.users);
   var reviewerIds = [project.advisorId, project.coAdvisorId, project.schoolAdvisorId].filter(Boolean);
   var recipients = users.filter(function (user) {
-    return reviewerIds.indexOf(user.userId) !== -1 && user.email;
+    return (reviewerIds.indexOf(user.userId) !== -1 || reviewerIds.indexOf(user.email) !== -1) && user.email;
   });
   var subject = '[' + SETTINGS.appName + '] มีงานใหม่รอตรวจ: ' + submission.title;
   var body = [
@@ -349,14 +479,14 @@ function filterProjectsForUser_(projects, user) {
     });
   }
   if (user.role === 'advisor') {
-    return projects.filter(function (project) { return project.advisorId === user.userId; });
+    return projects.filter(function (project) { return project.advisorId === user.userId || project.advisorId === user.email; });
   }
   if (user.role === 'co_advisor') {
-    return projects.filter(function (project) { return project.coAdvisorId === user.userId; });
+    return projects.filter(function (project) { return project.coAdvisorId === user.userId || project.coAdvisorId === user.email; });
   }
   if (user.role === 'school_advisor') {
     return projects.filter(function (project) {
-      return project.schoolAdvisorId === user.userId || (user.school && project.school === user.school);
+      return project.schoolAdvisorId === user.userId || project.schoolAdvisorId === user.email || (user.school && project.school === user.school);
     });
   }
   return [];
@@ -448,11 +578,11 @@ function ensureSheets_() {
   if (readRows_(SHEETS.users).length === 0) {
     var now = new Date().toISOString();
     appendRow_(SHEETS.users, {
-      userId: 'admin',
+      userId: SETTINGS.adminEmail,
       password: 'admin123',
       role: 'admin',
       name: 'ผู้ดูแลระบบ',
-      email: '',
+      email: SETTINGS.adminEmail,
       studentId: '',
       school: '',
       active: 'TRUE',
@@ -474,6 +604,16 @@ function getSheet_(definition) {
   if (!hasHeader) {
     headerRange.setValues([definition.headers]);
     sheet.setFrozenRows(1);
+  } else {
+    var missing = definition.headers.filter(function (header) {
+      return current.indexOf(header) === -1;
+    });
+    if (missing.length) {
+      var headerCount = current.reduce(function (count, value, index) {
+        return value ? index + 1 : count;
+      }, 0);
+      sheet.getRange(1, headerCount + 1, 1, missing.length).setValues([missing]);
+    }
   }
   return sheet;
 }
@@ -540,4 +680,13 @@ function split_(value) {
   return String(value || '').split(',').map(function (item) {
     return item.trim();
   }).filter(Boolean);
+}
+
+function generatePassword_() {
+  var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  var password = '';
+  for (var index = 0; index < 10; index += 1) {
+    password += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  }
+  return password;
 }

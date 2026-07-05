@@ -40,7 +40,7 @@
       <form id="loginForm" class="stack">
         <label>
           บัญชีผู้ใช้
-          <input id="account" autocomplete="username" placeholder="รหัสนักเรียน / อีเมล / admin" required>
+          <input id="account" autocomplete="username" placeholder="นักเรียน: รหัสนักเรียน | อาจารย์/admin: อีเมล" required>
         </label>
         <label>
           รหัสผ่าน
@@ -119,7 +119,7 @@
             <div>
               <span class="eyebrow">Submit</span>
               <h2>ส่งงานใหม่</h2>
-              <p>แนบลิงก์ Google Drive, Docs, Slides หรือไฟล์งานที่แชร์สิทธิ์ให้อาจารย์เรียบร้อยแล้ว</p>
+              <p>อัปโหลดไฟล์โครงร่างเข้าคลัง Drive หรือแนบลิงก์ Google Drive/Docs/Slides ที่แชร์สิทธิ์แล้ว</p>
             </div>
           </div>
           <form id="submitForm" class="form-grid">
@@ -142,8 +142,12 @@
               <input id="submissionTitle" placeholder="เช่น รายงานความก้าวหน้าครั้งที่ 1" required>
             </label>
             <label class="full-field">
-              ลิงก์ไฟล์งาน
-              <input id="fileUrl" type="url" placeholder="https://drive.google.com/..." required>
+              ไฟล์โครงร่าง / ไฟล์งาน
+              <input id="submissionFile" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png">
+            </label>
+            <label class="full-field">
+              ลิงก์ไฟล์งานสำรอง
+              <input id="fileUrl" type="url" placeholder="https://drive.google.com/...">
             </label>
             <label class="full-field">
               หมายเหตุถึงอาจารย์
@@ -178,8 +182,9 @@
               </div>
             </div>
             <form id="userForm" class="stack">
-              <label>รหัสผู้ใช้ <input id="newUserId" required></label>
-              <label>รหัสผ่าน <input id="newPassword" required></label>
+              <div class="soft-note">นักเรียนใช้ <strong>รหัสนักเรียน</strong> เป็น USER ส่วน admin/อาจารย์ทุกประเภทใช้ <strong>อีเมล</strong> เป็น USER — เว้นรหัสผ่านว่างไว้เพื่อ Gen อัตโนมัติ</div>
+              <label>รหัสผู้ใช้ <input id="newUserId" placeholder="เว้นว่างได้: นักเรียนใช้รหัสนักเรียน / staff ใช้อีเมล"></label>
+              <label>รหัสผ่าน <input id="newPassword" placeholder="เว้นว่างเพื่อ Gen Password"></label>
               <label>
                 บทบาท
                 <select id="newRole">
@@ -195,6 +200,8 @@
               <label>รหัสนักเรียน <input id="newStudentId"></label>
               <label>โรงเรียน <input id="newSchool"></label>
               <button class="primary-button" type="submit">บันทึกผู้ใช้งาน</button>
+              <button id="generateAccountsButton" class="secondary-button" type="button">Gen Password นักเรียนจากโครงงาน</button>
+              <div id="generatedCredential" class="credential-box hidden"></div>
             </form>
           </article>
 
@@ -210,9 +217,10 @@
               <label>ชื่อโครงงาน <input id="newProjectTitle" required></label>
               <label>รหัสนักเรียนในกลุ่ม <input id="newProjectStudents" placeholder="คั่นด้วยเครื่องหมาย ,"></label>
               <label>ชื่อนักเรียน <input id="newProjectStudentNames" placeholder="คั่นด้วยเครื่องหมาย ,"></label>
-              <label>อาจารย์ที่ปรึกษา <input id="newAdvisorId"></label>
-              <label>อาจารย์ที่ปรึกษาร่วม <input id="newCoAdvisorId"></label>
-              <label>อาจารย์โรงเรียน <input id="newSchoolAdvisorId"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาหลัก <input id="newAdvisorId" type="email"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาร่วม <input id="newCoAdvisorId" type="email"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาโรงเรียน <input id="newSchoolAdvisorId" type="email"></label>
+              <label>โรงเรียน <input id="newProjectSchool"></label>
               <label>กำหนดส่ง <input id="newDueDate" type="date"></label>
               <button class="primary-button" type="submit">บันทึกโครงงาน</button>
             </form>
