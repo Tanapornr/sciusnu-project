@@ -2,16 +2,12 @@ const fs = require('fs');
 const path = require('path');
 
 const root = process.cwd();
-const source = path.join(root, 'outputs', 'sciusnu-smart-style-code');
+const source = path.join(root, 'outputs', 'student-work-submission-new');
 const target = path.join(root, 'dist');
 const files = [
   'index.html',
-  'student.html',
-  'advisor.html',
-  'viewer.html',
-  'admin.html',
   'style.css',
-  'shared.js',
+  'app.js',
   'config.js'
 ];
 
@@ -23,11 +19,13 @@ for (const file of files) {
   const to = path.join(target, file);
   let content = fs.readFileSync(from, 'utf8');
 
-  if (file === 'config.js' && process.env.APPS_SCRIPT_URL) {
-    content = content.replace('PASTE_APPS_SCRIPT_EXEC_URL_HERE', process.env.APPS_SCRIPT_URL);
+  if (file === 'config.js' && process.env.PROJECTFLOW_APPS_SCRIPT_URL) {
+    content = content
+      .replace("APPS_SCRIPT_URL: '',", "APPS_SCRIPT_URL: '" + process.env.PROJECTFLOW_APPS_SCRIPT_URL + "',")
+      .replace('DEMO_MODE: true', 'DEMO_MODE: false');
   }
 
   fs.writeFileSync(to, content, 'utf8');
 }
 
-console.log('Built static SCIUSNU SMART site into dist');
+console.log('Built ProjectFlow submission site into dist');
