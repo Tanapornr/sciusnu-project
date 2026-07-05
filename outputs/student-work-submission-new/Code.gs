@@ -253,6 +253,11 @@ function createRequest_(user, payload) {
     throw new Error('กรุณาเลือกประเภทคำร้องที่เปิดใช้งาน');
   }
 
+  var ownerSignature = String(payload.ownerSignature || '').trim();
+  if (!ownerSignature) {
+    throw new Error('กรุณาเซ็นเอกสารคำร้องก่อนส่ง');
+  }
+
   var projects = readRows_(SHEETS.projects);
   var project = projects.filter(function (item) { return item.projectId === payload.projectId; })[0];
   if (!project) throw new Error('ไม่พบโครงงาน');
@@ -266,7 +271,7 @@ function createRequest_(user, payload) {
 
   var now = new Date().toISOString();
   var users = readRows_(SHEETS.users);
-  var signatures = buildRequestSigners_(project, user, users, now, payload.ownerSignature);
+  var signatures = buildRequestSigners_(project, user, users, now, ownerSignature);
   var nextSigner = nextUnsignedSigner_(signatures);
   var requestPayload = {
     prefix: payload.prefix || '',

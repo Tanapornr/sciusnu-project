@@ -523,6 +523,11 @@ function renderRequests(requests, stats) {
         </div>
         <h3>${escapeHtml(request.projectTitle || request.projectId)}</h3>
         <p>${escapeHtml(requestDetailText(request, payload))}</p>
+        <div class="request-owner-line">
+          <span>เจ้าของเรื่อง</span>
+          <strong>${escapeHtml(request.requesterName || '-')}</strong>
+          <small>${escapeHtml(request.requesterId || '')}</small>
+        </div>
         <div class="request-progress">
           <span style="width:${Math.round((signed / total) * 100)}%"></span>
         </div>
@@ -535,6 +540,7 @@ function renderRequests(requests, stats) {
           ${signatures.map(signer => `
             <span class="${signer.status === 'signed' ? 'is-signed' : ''}">
               ${escapeHtml(signer.label)} · ${escapeHtml(signer.name || '-')}
+              <small>${signer.status === 'signed' ? `เซ็นแล้ว: ${escapeHtml(signer.signature || signer.signedName || signer.name || '-')}` : 'รอเซ็น'}</small>
             </span>
           `).join('')}
         </div>
@@ -580,6 +586,20 @@ function requestDetailText(request, payload) {
     return `สาขาปัจจุบัน ${payload.currentBranch || '-'} → สาขาใหม่ ${payload.newBranch || '-'}`;
   }
   return payload.otherSubject || payload.otherDetail || 'คำร้องอื่น ๆ';
+}
+
+function currentRequestProject(projectId) {
+  return (state.dashboard?.projects || []).find(item => item.projectId === projectId) || {};
+}
+
+function requestDocumentDetailText(type, payload, project) {
+  if (type === 'project_name') {
+    return `ขอเปลี่ยนชื่อจาก “${project.title || '-'}” เป็น “${payload.newTitleTh || payload.newTitleEn || '-'}”`;
+  }
+  if (type === 'project_branch') {
+    return `ขอเปลี่ยนรหัส/สาขาโครงงานจาก “${payload.currentBranch || project.school || '-'}” เป็น “${payload.newBranch || '-'}”`;
+  }
+  return payload.otherDetail || payload.otherSubject || '-';
 }
 
 function requestTypeLabel(type) {
@@ -810,6 +830,7 @@ function requestSignatureStepMarkup() {
       <div class="signature-flow">
         <span>ผู้ยื่น</span><span>เพื่อน</span><span>อาจารย์หลัก</span><span>อาจารย์ร่วม</span><span>อาจารย์โรงเรียน</span><span>admin</span>
       </div>
+      ${requestSignatureDocumentMarkup()}
       <label class="full-field">พิมพ์ชื่อ-สกุลเพื่อเซ็น *
         <input id="ownerSignatureName" value="${escapeAttribute(user.name || '')}" required>
       </label>
@@ -818,6 +839,39 @@ function requestSignatureStepMarkup() {
         <span>ข้าพเจ้าขอยืนยันว่าข้อมูลในคำร้องนี้ถูกต้อง และยอมรับการใช้ลายเซ็นอิเล็กทรอนิกส์</span>
       </label>
     </div>
+  `;
+}
+
+function requestSignatureDocumentMarkup() {
+  const user = state.auth?.user || {};
+  const payload = state.requestWizard.payload || {};
+  const project = currentRequestProject(payload.projectId);
+  const ownerId = user.studentId || user.userId || '-';
+  return `
+    <section class="request-document" aria-label="เอกสารคำร้อง">
+      <div class="request-document-title">
+        <span>เอกสารคำร้อง</span>
+        <strong>${escapeHtml(requestTypeLabel(state.requestWizard.type))}</strong>
+      </div>
+      <div class="request-document-grid">
+        <div>
+          <small>เจ้าของเรื่อง</small>
+          <strong>${escapeHtml(user.name || '-')}</strong>
+          <span>${escapeHtml(ownerId)}</span>
+        </div>
+        <div>
+          <small>โครงงาน</small>
+          <strong>${escapeHtml(project.projectId || payload.projectId || '-')}</strong>
+          <span>${escapeHtml(project.title || '-')}</span>
+        </div>
+      </div>
+      <p>${escapeHtml(requestDocumentDetailText(state.requestWizard.type, payload, project))}</p>
+      <div class="signature-stamp">
+        <small>ลงชื่อผู้ยื่นคำร้อง</small>
+        <strong>${escapeHtml(user.name || 'กรุณาพิมพ์ชื่อด้านล่าง')}</strong>
+        <span>ระบบจะใช้ชื่อที่พิมพ์ด้านล่างเป็นลายเซ็นอิเล็กทรอนิกส์</span>
+      </div>
+    </section>
   `;
 }
 

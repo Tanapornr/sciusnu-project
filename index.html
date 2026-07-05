@@ -1,0 +1,298 @@
+﻿<!doctype html>
+<html lang="th">
+<!-- โค้ดส่วนนี้: ไฟล์นี้ถูกวางไว้หน้า repo root เพื่อให้อ่านและนำเสนอได้ง่าย ส่วนระบบจริงใช้ source ใน outputs/student-work-submission-new -->
+<!-- โค้ดส่วนนี้: กำหนดข้อมูลพื้นฐานของหน้าเว็บ เช่น ภาษา ขนาดหน้าจอ ชื่อหน้า และไฟล์ CSS -->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectFlow | ระบบส่งโครงงานนักเรียน</title>
+  <link rel="stylesheet" href="outputs/student-work-submission-new/style.css">
+</head>
+<body>
+  <!-- โค้ดส่วนนี้: ฉากหลังแบบนุ่ม ๆ ของระบบ -->
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <!-- โค้ดส่วนนี้: หน้าเข้าสู่ระบบสำหรับนักเรียน อาจารย์ และผู้ดูแลระบบ -->
+  <main id="loginView" class="login-layout">
+    <section class="login-hero">
+      <div class="eyebrow">ระบบส่งโครงงานนักเรียน</div>
+      <h1>Project Submission</h1>
+      <p>เข้าสู่ระบบเพื่อส่งงาน ตรวจงาน และติดตามสถานะโครงงาน</p>
+    </section>
+
+    <section class="login-card glass-card">
+      <div>
+        <div class="brand-mark">PF</div>
+        <h2>เข้าสู่ระบบ</h2>
+        <p>สำหรับนักเรียนและอาจารย์ที่เกี่ยวข้อง</p>
+      </div>
+      <form id="loginForm" class="stack">
+        <label>
+          บัญชีผู้ใช้
+          <input id="account" autocomplete="username" placeholder="รหัสนักเรียน หรืออีเมล" required>
+        </label>
+        <label>
+          รหัสผ่าน
+          <input id="password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" required>
+        </label>
+        <button id="loginButton" class="primary-button" type="submit">เข้าสู่ระบบ</button>
+      </form>
+      <div id="demoNotice" class="soft-note hidden"></div>
+    </section>
+  </main>
+
+  <!-- โค้ดส่วนนี้: โครงหน้าหลักหลังจากผู้ใช้เข้าสู่ระบบสำเร็จ -->
+  <section id="appView" class="app-layout hidden">
+    <!-- โค้ดส่วนนี้: เมนูด้านซ้าย ใช้เปลี่ยนหน้าในระบบตามสิทธิ์ของผู้ใช้ -->
+    <aside class="sidebar glass-card">
+      <div class="brand-line">
+        <div class="brand-mark">PF</div>
+        <div>
+          <strong>ProjectFlow</strong>
+          <span>Student submission</span>
+        </div>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="overview">ภาพรวม</button>
+        <button class="nav-item" data-view="submit">ส่งงาน</button>
+        <button class="nav-item" data-view="requests">คำร้องทั่วไป</button>
+        <button class="nav-item" data-view="review">ตรวจงาน</button>
+        <button class="nav-item" data-view="admin">จัดการระบบ</button>
+      </nav>
+
+      <button id="logoutButton" class="ghost-button">ออกจากระบบ</button>
+    </aside>
+
+    <!-- โค้ดส่วนนี้: พื้นที่แสดงข้อมูลหลักของระบบ -->
+    <main class="workspace">
+      <header class="topbar glass-card">
+        <div>
+          <div class="eyebrow" id="roleBadge">Workspace</div>
+          <h1 id="workspaceTitle">ภาพรวมระบบ</h1>
+          <p id="workspaceSubtitle">ติดตามสถานะส่งงานและการอนุมัติแบบเรียลไทม์</p>
+        </div>
+        <div class="profile-pill">
+          <span id="userInitial">U</span>
+          <div>
+            <strong id="userName">ผู้ใช้งาน</strong>
+            <small id="userEmail">-</small>
+          </div>
+        </div>
+      </header>
+
+      <!-- โค้ดส่วนนี้: หน้าแสดงภาพรวม โครงงาน สถิติ และประวัติการส่งงาน -->
+      <section id="overviewPanel" class="view-panel">
+        <div id="statsGrid" class="stats-grid"></div>
+        <div class="two-column">
+          <article class="glass-card panel-card">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Projects</span>
+                <h2>โครงงานของฉัน</h2>
+              </div>
+            </div>
+            <div id="projectList" class="card-list"></div>
+          </article>
+
+          <article class="glass-card panel-card">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Timeline</span>
+                <h2>ประวัติการส่งงาน</h2>
+              </div>
+            </div>
+            <div id="submissionList" class="timeline"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- โค้ดส่วนนี้: หน้าส่งงานของนักเรียน ใช้อัปโหลดไฟล์ PDF เท่านั้น -->
+      <section id="submitPanel" class="view-panel hidden">
+        <article class="glass-card panel-card wide-card">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">Submit</span>
+              <h2>ส่งงานใหม่</h2>
+              <p>อัปโหลดไฟล์ PDF เพื่อส่งให้อาจารย์ตรวจเท่านั้น</p>
+            </div>
+          </div>
+          <form id="submitForm" class="form-grid">
+            <label class="full-field">
+              โครงงาน
+              <select id="submitProject" required></select>
+              <span id="selectedProjectTitle" class="project-title-preview hidden"></span>
+            </label>
+            <label>
+              ประเภทงาน
+              <select id="workType" required>
+                <option value="ข้อเสนอโครงงาน">ข้อเสนอโครงงาน</option>
+                <option value="รายงานความก้าวหน้า">รายงานความก้าวหน้า</option>
+                <option value="ฉบับแก้ไข">ฉบับแก้ไข</option>
+                <option value="รูปเล่มสมบูรณ์">รูปเล่มสมบูรณ์</option>
+                <option value="สไลด์นำเสนอ">สไลด์นำเสนอ</option>
+              </select>
+            </label>
+            <label class="full-field">
+              ชื่องาน / รอบที่ส่ง
+              <input id="submissionTitle" placeholder="เช่น รายงานความก้าวหน้าครั้งที่ 1" required>
+            </label>
+            <label class="full-field">
+              ไฟล์ PDF โครงร่าง / ไฟล์งาน
+              <input id="submissionFile" type="file" accept=".pdf,application/pdf" required>
+            </label>
+            <label class="full-field">
+              หมายเหตุถึงอาจารย์
+              <textarea id="studentNote" rows="4" placeholder="สรุปสิ่งที่ปรับแก้ หรือคำถามที่ต้องการให้อาจารย์ช่วยดู"></textarea>
+            </label>
+            <button id="submitButton" class="primary-button" type="submit">ส่งงานให้อาจารย์</button>
+          </form>
+        </article>
+      </section>
+
+      <!-- โค้ดส่วนนี้: หน้าตรวจงานของอาจารย์ ใช้อนุมัติหรือส่งงานกลับให้นักเรียนแก้ไข -->
+      <section id="reviewPanel" class="view-panel hidden">
+        <article class="glass-card panel-card wide-card">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">Review</span>
+              <h2>งานที่รอตรวจ</h2>
+              <p>อนุมัติหรือส่งกลับให้นักเรียนแก้ไข พร้อมแจ้งเตือนทางอีเมล</p>
+            </div>
+            <button id="reminderButton" class="secondary-button">ส่งอีเมลเตือนงานค้าง</button>
+          </div>
+          <div id="reviewQueue" class="review-grid"></div>
+        </article>
+      </section>
+
+      <!-- โค้ดส่วนนี้: หน้าคำร้องทั่วไป ใช้ติดตามสถานะคำร้องและลำดับลายเซ็น -->
+      <section id="requestsPanel" class="view-panel hidden">
+        <article class="glass-card panel-card wide-card request-workspace">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">Requests</span>
+              <h2>คำร้องทั่วไป</h2>
+              <p>ยื่นคำร้องและติดตามลำดับการเซ็นอิเล็กทรอนิกส์ของนักเรียน เพื่อน อาจารย์ และผู้ดูแลระบบ</p>
+            </div>
+            <button id="openRequestModalButton" class="primary-button" type="button">+ ยื่นคำร้องใหม่</button>
+          </div>
+          <div class="request-alert">
+            <strong>ลำดับการเซ็นคำร้อง</strong>
+            <span>ผู้ยื่นคำร้อง → เพื่อนร่วมโครงงาน → อาจารย์ที่ปรึกษาหลัก → อาจารย์ที่ปรึกษาร่วม → อาจารย์ที่ปรึกษาโรงเรียน → ผู้ดูแลระบบ</span>
+          </div>
+          <div id="requestStatsGrid" class="request-stats-grid"></div>
+          <div id="requestList" class="request-list"></div>
+        </article>
+      </section>
+
+      <!-- โค้ดส่วนนี้: หน้าจัดการระบบสำหรับผู้ดูแล ใช้เพิ่มผู้ใช้และเพิ่มโครงงาน -->
+      <section id="adminPanel" class="view-panel hidden">
+        <div class="two-column">
+          <article class="glass-card panel-card">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Users</span>
+                <h2>เพิ่มผู้ใช้งาน</h2>
+              </div>
+            </div>
+            <form id="userForm" class="stack">
+              <div class="soft-note">นักเรียนใช้ <strong>รหัสนักเรียน</strong> เป็น USER ส่วน admin/อาจารย์ทุกประเภทใช้ <strong>อีเมล</strong> เป็น USER — เว้นรหัสผ่านว่างไว้เพื่อ Gen อัตโนมัติ</div>
+              <label>รหัสผู้ใช้ <input id="newUserId" placeholder="เว้นว่างได้: นักเรียนใช้รหัสนักเรียน / staff ใช้อีเมล"></label>
+              <label>รหัสผ่าน <input id="newPassword" placeholder="เว้นว่างเพื่อ Gen Password"></label>
+              <label>
+                บทบาท
+                <select id="newRole">
+                  <option value="student">นักเรียน</option>
+                  <option value="advisor">อาจารย์ที่ปรึกษา</option>
+                  <option value="co_advisor">อาจารย์ที่ปรึกษาร่วม</option>
+                  <option value="school_advisor">อาจารย์ที่ปรึกษาโรงเรียน</option>
+                  <option value="admin">ผู้ดูแลระบบ</option>
+                </select>
+              </label>
+              <label>ชื่อ-สกุล <input id="newName" required></label>
+              <label>อีเมล <input id="newEmail" type="email"></label>
+              <label>รหัสนักเรียน <input id="newStudentId"></label>
+              <label>โรงเรียน <input id="newSchool"></label>
+              <button class="primary-button" type="submit">บันทึกผู้ใช้งาน</button>
+              <button id="generateAccountsButton" class="secondary-button" type="button">Gen Password นักเรียนจากโครงงาน</button>
+              <div id="generatedCredential" class="credential-box hidden"></div>
+            </form>
+          </article>
+
+          <article class="glass-card panel-card">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Projects</span>
+                <h2>เพิ่มโครงงาน</h2>
+              </div>
+            </div>
+            <form id="projectForm" class="stack">
+              <label>รหัสโครงงาน <input id="newProjectId" required></label>
+              <label>ชื่อโครงงาน <input id="newProjectTitle" required></label>
+              <label>รหัสนักเรียนในกลุ่ม <input id="newProjectStudents" placeholder="คั่นด้วยเครื่องหมาย ,"></label>
+              <label>ชื่อนักเรียน <input id="newProjectStudentNames" placeholder="คั่นด้วยเครื่องหมาย ,"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาหลัก <input id="newAdvisorId" type="email"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาร่วม <input id="newCoAdvisorId" type="email"></label>
+              <label>อีเมลอาจารย์ที่ปรึกษาโรงเรียน <input id="newSchoolAdvisorId" type="email"></label>
+              <label>โรงเรียน <input id="newProjectSchool"></label>
+              <label>กำหนดส่ง <input id="newDueDate" type="date"></label>
+              <button class="primary-button" type="submit">บันทึกโครงงาน</button>
+            </form>
+          </article>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <!-- โค้ดส่วนนี้: กล่องยื่นคำร้องออนไลน์แบบ 4 ขั้นตอน -->
+  <div id="requestModal" class="request-modal hidden" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
+    <section class="request-dialog glass-card">
+      <header class="request-dialog-head">
+        <div>
+          <h2 id="requestModalTitle">ยื่นคำร้องออนไลน์</h2>
+          <p id="requestStepText">ขั้นตอนที่ 1/4</p>
+        </div>
+        <button id="closeRequestModalButton" class="icon-button" type="button" aria-label="ปิด">×</button>
+      </header>
+      <div id="requestSteps" class="request-steps"></div>
+      <div id="requestModalBody" class="request-modal-body"></div>
+      <footer class="request-dialog-footer">
+        <button id="requestBackButton" class="ghost-button" type="button">ย้อนกลับ</button>
+        <button id="requestNextButton" class="primary-button" type="button">ถัดไป</button>
+      </footer>
+    </section>
+  </div>
+
+  <!-- โค้ดส่วนนี้: กล่องบังคับเปลี่ยนรหัสผ่านครั้งแรกของนักเรียน -->
+  <div id="passwordModal" class="password-modal hidden" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+    <form id="changePasswordForm" class="password-card glass-card">
+      <span class="eyebrow">First Login</span>
+      <h2 id="passwordModalTitle">เปลี่ยนรหัสผ่านก่อนเริ่มใช้งาน</h2>
+      <p>ระบบสร้างรหัสผ่าน 4 ตัวให้ครั้งแรก เพื่อความปลอดภัยให้นักเรียนตั้งรหัสใหม่ก่อนส่งงาน</p>
+      <label>
+        รหัสผ่านเดิม
+        <input id="currentPassword" type="password" autocomplete="current-password" inputmode="numeric" required>
+      </label>
+      <label>
+        รหัสผ่านใหม่
+        <input id="changeNewPassword" type="password" autocomplete="new-password" minlength="4" required>
+      </label>
+      <label>
+        ยืนยันรหัสผ่านใหม่
+        <input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="4" required>
+      </label>
+      <button id="changePasswordButton" class="primary-button" type="submit">บันทึกรหัสผ่านใหม่</button>
+    </form>
+  </div>
+
+  <!-- โค้ดส่วนนี้: กล่องแจ้งเตือนข้อความสั้น ๆ หลังผู้ใช้ทำรายการ -->
+  <div id="toast" class="toast"></div>
+
+  <!-- โค้ดส่วนนี้: เรียกไฟล์ตั้งค่าและไฟล์ JavaScript หลักของระบบ -->
+  <script src="outputs/student-work-submission-new/config.js"></script>
+  <script src="outputs/student-work-submission-new/app.js"></script>
+</body>
+</html>
+
+

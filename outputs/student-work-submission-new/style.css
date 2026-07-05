@@ -908,6 +908,32 @@ a {
   line-height: 1.65;
 }
 
+.request-owner-line {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid rgba(20, 184, 166, 0.16);
+  border-radius: 18px;
+  padding: 0.8rem 0.9rem;
+  background: rgba(240, 253, 250, 0.78);
+}
+
+.request-owner-line span {
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.request-owner-line strong {
+  color: #111827;
+}
+
+.request-owner-line small {
+  color: var(--muted);
+  font-weight: 850;
+}
+
 .request-progress {
   overflow: hidden;
   height: 8px;
@@ -930,6 +956,20 @@ a {
   background: rgba(241, 245, 249, 0.9);
   font-size: 0.78rem;
   font-weight: 850;
+}
+
+.signature-list span {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  border-radius: 16px;
+}
+
+.signature-list small {
+  color: inherit;
+  opacity: 0.78;
+  font-size: 0.7rem;
 }
 
 .signature-list span.is-signed {
@@ -1130,6 +1170,77 @@ a {
   font-weight: 900;
 }
 
+.request-document {
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid rgba(24, 33, 47, 0.1);
+  border-radius: 24px;
+  padding: 1rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(240, 253, 250, 0.88)),
+    rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.07);
+}
+
+.request-document-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.request-document-title span {
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.request-document-title strong {
+  color: #111827;
+}
+
+.request-document-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.request-document-grid div,
+.signature-stamp {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid rgba(20, 184, 166, 0.15);
+  border-radius: 18px;
+  padding: 0.8rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.request-document-grid small,
+.signature-stamp small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.request-document-grid strong,
+.signature-stamp strong {
+  color: #111827;
+}
+
+.request-document-grid span,
+.signature-stamp span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
+.signature-stamp {
+  border-style: dashed;
+}
+
 .check-line {
   display: flex;
   grid-template-columns: auto 1fr;
@@ -1268,6 +1379,7 @@ a {
   .stats-grid,
   .request-stats-grid,
   .request-owner-grid,
+  .request-document-grid,
   .form-grid,
   .nav-list {
     grid-template-columns: 1fr;
