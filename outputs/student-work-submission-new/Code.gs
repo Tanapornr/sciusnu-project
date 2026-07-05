@@ -48,6 +48,18 @@ function doPost(e) {
   }
 }
 
+function authorizeProjectFlow_() {
+  ensureSheets_();
+  DriveApp.getFolderById(SETTINGS.driveFolderId).getName();
+  MailApp.getRemainingDailyQuota();
+  return {
+    ok: true,
+    app: SETTINGS.appName,
+    spreadsheetId: SETTINGS.spreadsheetId,
+    driveFolderId: SETTINGS.driveFolderId
+  };
+}
+
 function route_(request) {
   var action = request.action;
   var payload = request.payload || {};
