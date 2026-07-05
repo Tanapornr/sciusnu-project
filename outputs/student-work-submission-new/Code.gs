@@ -10,7 +10,7 @@ var SETTINGS = {
 var SHEETS = {
   users: {
     name: 'Users',
-    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt', 'phone']
+    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt', 'phone', 'photoUrl', 'photoFileId']
   },
   projects: {
     name: 'Projects',
@@ -77,6 +77,7 @@ function route_(request) {
 
   var user = requireUser_(request.token);
   if (action === 'changePassword') return changePassword_(user, payload);
+  if (action === 'updateProfilePhoto') return updateProfilePhoto_(user, payload);
   if (action === 'dashboard') return dashboard_(user);
   if (action === 'submitWork') return submitWork_(user, payload);
   if (action === 'reviewSubmission') return reviewSubmission_(user, payload);
@@ -131,6 +132,36 @@ function changePassword_(user, payload) {
   };
 }
 
+function updateProfilePhoto_(user, payload) {
+  if (user.role !== 'student') throw new Error('เฉพาะนักเรียนเท่านั้นที่เปลี่ยนรูปโปรไฟล์ได้');
+  if (!payload.fileData) throw new Error('กรุณาเลือกรูปภาพ');
+
+  var mimeType = String(payload.fileMimeType || '').toLowerCase();
+  var allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (allowedTypes.indexOf(mimeType) === -1) throw new Error('รองรับเฉพาะไฟล์รูป JPG, PNG หรือ WEBP');
+
+  var storedFile = storeProfilePhoto_(user, payload);
+  var now = new Date().toISOString();
+  updateRowById_(SHEETS.users, 'userId', user.userId, {
+    photoUrl: storedFile.url,
+    photoFileId: storedFile.id,
+    updatedAt: now
+  });
+
+  if (user.photoFileId && user.photoFileId !== storedFile.id) {
+    try {
+      DriveApp.getFileById(user.photoFileId).setTrashed(true);
+    } catch (error) {
+      // ไม่หยุดการทำงาน ถ้าลบรูปเก่าไม่ได้
+    }
+  }
+
+  audit_(user.userId, 'updateProfilePhoto', storedFile.id);
+  return {
+    user: safeUser_(findUser_(user.userId))
+  };
+}
+
 function dashboard_(user) {
   var users = readRows_(SHEETS.users);
   var projects = filterProjectsForUser_(readRows_(SHEETS.projects), user).map(function (project) {
@@ -140,7 +171,7 @@ function dashboard_(user) {
   var submissions = readRows_(SHEETS.submissions).filter(function (submission) {
     return user.role === 'admin' || projectIds.indexOf(submission.projectId) !== -1;
   }).map(function (submission) {
-    return enrichSubmission_(submission, projects, user);
+    return enrichSubmission_(submission, projects, user, users);
   });
   submissions.sort(function (a, b) {
     return new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0);
@@ -759,6 +790,37 @@ function storeSubmissionFile_(project, payload, user) {
   };
 }
 
+function storeProfilePhoto_(user, payload) {
+  var root = DriveApp.getFolderById(SETTINGS.driveFolderId);
+  var profileFolder = getOrCreateFolder_(root, '_profile_photos');
+  var bytes = Utilities.base64Decode(payload.fileData);
+  if (bytes.length > 4 * 1024 * 1024) throw new Error('รูปภาพต้องมีขนาดไม่เกิน 4 MB');
+
+  var extension = profilePhotoExtension_(payload.fileMimeType);
+  var owner = user.studentId || user.userId || 'student';
+  var safeName = sanitizeFileName_('profile-' + owner + '-' + Date.now()) + extension;
+  var blob = Utilities.newBlob(bytes, payload.fileMimeType, safeName);
+  var file = profileFolder.createFile(blob);
+  file.setDescription('Profile photo of ' + user.name + ' in ' + SETTINGS.appName);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (error) {
+    // ถ้าองค์กรปิดการแชร์สาธารณะ ระบบยังเก็บรูปไว้ใน Drive ได้
+  }
+  return {
+    id: file.getId(),
+    name: file.getName(),
+    url: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w320'
+  };
+}
+
+function profilePhotoExtension_(mimeType) {
+  var type = String(mimeType || '').toLowerCase();
+  if (type === 'image/png') return '.png';
+  if (type === 'image/webp') return '.webp';
+  return '.jpg';
+}
+
 function validatePdfPayload_(payload) {
   var fileName = String(payload.fileName || '').toLowerCase();
   var mimeType = String(payload.fileMimeType || '').toLowerCase();
@@ -1218,11 +1280,15 @@ function notifyRequestCompleted_(request, project, users) {
   );
 }
 
-function enrichSubmission_(submission, projects, user) {
+function enrichSubmission_(submission, projects, user, users) {
   var project = projects.filter(function (item) { return item.projectId === submission.projectId; })[0] || {};
+  var student = findSubmissionStudent_(submission, project, users || []);
   submission.projectTitle = project.title || submission.projectId;
   submission.dueDate = project.dueDate || '';
-  if (!submission.studentNames) submission.studentNames = project.studentNames || submission.studentId || '';
+  if (!submission.studentNames) submission.studentNames = student.name || project.studentNames || submission.studentId || '';
+  submission.studentPhotoUrl = student.photoUrl || '';
+  submission.studentPhone = student.phone || '';
+  submission.studentSchool = student.school || project.school || '';
   submission.canViewFile = canViewSubmissionFile_(user, project);
   submission.canReview = canReviewSubmission_(user, project);
   if (!submission.canViewFile) {
@@ -1260,7 +1326,33 @@ function enrichProject_(project, users) {
   project.advisorName = advisorName_(project.advisorId, users);
   project.coAdvisorName = advisorName_(project.coAdvisorId, users);
   project.schoolAdvisorName = advisorName_(project.schoolAdvisorId, users);
+  project.students = projectStudents_(project, users);
   return project;
+}
+
+function projectStudents_(project, users) {
+  var ids = split_(project.studentIds);
+  var names = split_(project.studentNames);
+  return ids.map(function (studentId, index) {
+    var student = findUserInList_(users, studentId) || {};
+    return {
+      studentId: student.studentId || studentId,
+      userId: student.userId || studentId,
+      name: student.name || names[index] || studentId,
+      photoUrl: student.photoUrl || '',
+      phone: student.phone || '',
+      school: student.school || project.school || ''
+    };
+  });
+}
+
+function findSubmissionStudent_(submission, project, users) {
+  var keys = [submission.studentId].concat(split_(project.studentIds || ''));
+  for (var index = 0; index < keys.length; index += 1) {
+    var student = findUserInList_(users, keys[index]);
+    if (student) return student;
+  }
+  return {};
 }
 
 function advisorName_(account, users) {
@@ -1357,6 +1449,7 @@ function safeUser_(user) {
     studentId: user.studentId,
     school: user.school,
     phone: user.phone,
+    photoUrl: user.photoUrl,
     mustChangePassword: toBoolean_(user.mustChangePassword)
   };
 }

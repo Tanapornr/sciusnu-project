@@ -156,6 +156,12 @@ function bindEvents() {
   });
 
   document.addEventListener('click', event => {
+    const photoTrigger = event.target.closest('[data-photo-trigger]');
+    if (photoTrigger) {
+      triggerProfilePhotoPicker();
+      return;
+    }
+
     const actionButton = event.target.closest('[data-review-action]');
     if (actionButton) {
       const submissionId = actionButton.dataset.submissionId;
@@ -386,7 +392,7 @@ function render() {
   elements.workspaceSubtitle.textContent = getSubtitle(user.role);
   elements.userName.textContent = user.name;
   elements.userEmail.textContent = user.email || user.userId || '-';
-  elements.userInitial.textContent = (user.name || user.userId || 'U').trim().charAt(0).toUpperCase();
+  renderProfileShell(user, projects);
 
   renderStats(data.stats || deriveStats(projects, submissions, queue));
   renderProjects(projects);
@@ -414,6 +420,82 @@ function renderStats(stats) {
   `).join('');
 }
 
+function renderProfileShell(user, projects) {
+  ensureProfileShell();
+  const photoUrl = user.photoUrl || '';
+  const initial = userInitialText(user);
+  setAvatarContent(elements.userInitial, photoUrl, initial, user.name || 'ผู้ใช้งาน');
+
+  const profilePill = document.querySelector('.profile-pill');
+  if (profilePill) {
+    profilePill.classList.toggle('can-change-photo', user.role === 'student');
+    profilePill.toggleAttribute('data-photo-trigger', user.role === 'student');
+    profilePill.title = user.role === 'student' ? 'คลิกเพื่อเปลี่ยนรูปโปรไฟล์' : '';
+  }
+
+  const welcomeCard = document.getElementById('studentWelcomeCard');
+  if (!welcomeCard) return;
+  const isStudent = user.role === 'student';
+  welcomeCard.classList.toggle('hidden', !isStudent);
+  if (!isStudent) return;
+
+  const studentId = user.studentId || user.userId || '-';
+  const project = (projects || [])[0] || {};
+  setAvatarContent(document.getElementById('welcomeAvatar'), photoUrl, initial, user.name || 'นักเรียน');
+  document.getElementById('welcomeName').textContent = user.name || 'นักเรียน';
+  document.getElementById('welcomeStudentId').textContent = `ID: ${studentId}`;
+  document.getElementById('welcomeProjectHint').textContent = project.projectId
+    ? `โครงงาน ${project.projectId}`
+    : 'กดรูปเพื่อเปลี่ยนรูปโปรไฟล์';
+}
+
+function ensureProfileShell() {
+  if (!document.getElementById('profilePhotoInput')) {
+    const input = document.createElement('input');
+    input.id = 'profilePhotoInput';
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.hidden = true;
+    input.addEventListener('change', handleProfilePhotoChange);
+    document.body.appendChild(input);
+  }
+
+  const topbar = document.querySelector('.topbar');
+  if (!topbar || document.getElementById('studentWelcomeCard')) return;
+
+  const welcome = document.createElement('section');
+  welcome.id = 'studentWelcomeCard';
+  welcome.className = 'student-welcome-card hidden';
+  welcome.innerHTML = `
+    <div class="welcome-book" aria-hidden="true">📘</div>
+    <strong class="welcome-title">ยินดีต้อนรับ!</strong>
+    <button class="welcome-avatar-button" type="button" data-photo-trigger aria-label="เปลี่ยนรูปโปรไฟล์">
+      <span id="welcomeAvatar" class="welcome-avatar">U</span>
+      <small>เปลี่ยนรูป</small>
+    </button>
+    <h2 id="welcomeName">นักเรียน</h2>
+    <span id="welcomeStudentId" class="welcome-id">ID: -</span>
+    <p id="welcomeProjectHint">กดรูปเพื่อเปลี่ยนรูปโปรไฟล์</p>
+  `;
+  const profilePill = topbar.querySelector('.profile-pill');
+  topbar.insertBefore(welcome, profilePill || null);
+}
+
+function setAvatarContent(target, photoUrl, fallback, altText) {
+  if (!target) return;
+  if (photoUrl) {
+    target.classList.add('has-photo');
+    target.innerHTML = `<img src="${escapeAttribute(photoUrl)}" alt="${escapeAttribute(altText || 'รูปโปรไฟล์')}">`;
+    return;
+  }
+  target.classList.remove('has-photo');
+  target.textContent = fallback || 'U';
+}
+
+function userInitialText(user) {
+  return (user?.name || user?.userId || 'U').trim().charAt(0).toUpperCase();
+}
+
 function renderProjects(projects) {
   if (!projects.length) {
     elements.projectList.innerHTML = emptyState('ยังไม่มีโครงงานในบัญชีนี้');
@@ -430,6 +512,7 @@ function renderProjects(projects) {
       </div>
       <h3>${escapeHtml(project.title || project.projectId)}</h3>
       <p class="student-line">${escapeHtml(project.studentNames || project.studentIds || 'ยังไม่ระบุนักเรียน')}</p>
+      ${projectStudentStrip(project)}
       <div class="advisor-grid">
         ${advisorBlock('อาจารย์ที่ปรึกษาหลัก', project.advisorName || project.advisorId)}
         ${advisorBlock('อาจารย์ที่ปรึกษาร่วม', project.coAdvisorName || project.coAdvisorId)}
@@ -444,6 +527,24 @@ function renderProjects(projects) {
   }).join('');
 }
 
+function projectStudentStrip(project) {
+  const students = project.students || [];
+  if (!students.length) return '';
+  return `
+    <div class="project-student-strip">
+      ${students.slice(0, 4).map(student => `
+        <span class="project-student-chip">
+          ${avatarMarkup(student.photoUrl, student.name || student.studentId, 'project-student-avatar')}
+          <span>
+            <strong>${escapeHtml(student.name || student.studentId)}</strong>
+            <small>${escapeHtml(student.studentId || student.userId || '')}</small>
+          </span>
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
 function advisorBlock(label, value) {
   const name = String(value || '').trim();
   return `
@@ -455,24 +556,90 @@ function advisorBlock(label, value) {
 }
 
 function renderSubmissions(submissions) {
-  if (!submissions.length) {
-    elements.submissionList.innerHTML = emptyState('ยังไม่มีประวัติการส่งงาน');
-    return;
-  }
+  updateOverviewSubmissionTitle();
+  const stages = buildSubmissionStages(submissions);
+  const recent = submissions.slice(0, 2);
 
-  elements.submissionList.innerHTML = submissions.map(item => `
-    <article class="submission-card">
-      <div class="meta-row">
-        <span class="pill ${statusClass(item.status)}">${escapeHtml(item.status || 'ส่งแล้ว')}</span>
-        <span class="pill">${escapeHtml(item.workType || '-')}</span>
-        <span class="pill">${formatDate(item.createdAt || item.updatedAt)}</span>
+  elements.submissionList.innerHTML = `
+    <article class="submission-status-panel">
+      <div class="submission-status-head">
+        <span class="status-truck" aria-hidden="true">🚚</span>
+        <h3>สถานะการส่งงาน</h3>
       </div>
-      <h3>${escapeHtml(item.title || item.projectId)}</h3>
-      <p>${escapeHtml(item.note || 'ไม่มีหมายเหตุ')}</p>
-      ${item.reviewerNote ? `<p><strong>ข้อเสนอแนะ:</strong> ${escapeHtml(item.reviewerNote)}</p>` : ''}
-      ${item.canViewFile !== false && item.fileUrl ? `<a href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์งาน</a>` : ''}
+      <ol class="submission-step-list">
+        ${stages.map((stage, index) => `
+          <li class="submission-step ${stage.state}">
+            <span class="step-marker">${stage.state === 'approved' ? '✓' : index + 1}</span>
+            <div>
+              <strong>${escapeHtml(stage.title)}</strong>
+              <small>${escapeHtml(stage.label)}</small>
+            </div>
+          </li>
+        `).join('')}
+      </ol>
+      ${recent.length ? `
+        <div class="recent-submissions">
+          ${recent.map(item => `
+            <div class="recent-submission-row">
+              <span class="pill ${statusClass(item.status)}">${escapeHtml(displaySubmissionStatus(item.status))}</span>
+              <div>
+                <strong>${escapeHtml(item.workType || item.title || item.projectId)}</strong>
+                <small>${formatDate(item.createdAt || item.updatedAt)}${item.reviewerNote ? ` · ${escapeHtml(item.reviewerNote)}` : ''}</small>
+              </div>
+              ${item.canViewFile !== false && item.fileUrl ? `<a href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
     </article>
-  `).join('');
+  `;
+}
+
+function updateOverviewSubmissionTitle() {
+  const heading = elements.submissionList?.closest('.panel-card')?.querySelector('h2');
+  const eyebrow = elements.submissionList?.closest('.panel-card')?.querySelector('.eyebrow');
+  if (heading) heading.textContent = 'สถานะการส่งงาน';
+  if (eyebrow) eyebrow.textContent = 'Status';
+}
+
+function buildSubmissionStages(submissions) {
+  const stageDefinitions = [
+    { title: 'โครงร่าง (Proposal)', keywords: ['ข้อเสนอโครงงาน', 'โครงร่าง', 'proposal'] },
+    { title: 'รายงานความก้าวหน้า', keywords: ['รายงานความก้าวหน้า', 'progress'] },
+    { title: 'รายงานฉบับสมบูรณ์', keywords: ['รูปเล่มสมบูรณ์', 'รายงานฉบับสมบูรณ์', 'final'] }
+  ];
+
+  return stageDefinitions.map(stage => {
+    const submission = findSubmissionByKeywords(submissions, stage.keywords);
+    const state = submissionState(submission);
+    return {
+      title: stage.title,
+      state,
+      label: submission ? displaySubmissionStatus(submission.status) : 'ยังไม่ส่งงาน'
+    };
+  });
+}
+
+function findSubmissionByKeywords(submissions, keywords) {
+  return (submissions || []).find(item => {
+    const text = `${item.workType || ''} ${item.title || ''}`.toLowerCase();
+    return keywords.some(keyword => text.includes(keyword.toLowerCase()));
+  });
+}
+
+function submissionState(submission) {
+  if (!submission) return 'waiting';
+  const status = String(submission.status || '');
+  if (status === 'อนุมัติ') return 'approved';
+  if (status === 'ขอแก้ไข') return 'revision';
+  return 'submitted';
+}
+
+function displaySubmissionStatus(status) {
+  if (status === 'อนุมัติ') return 'อนุมัติแล้ว';
+  if (status === 'ขอแก้ไข') return 'ส่งกลับแก้ไข';
+  if (!status) return 'รอตรวจ';
+  return status;
 }
 
 function renderReviewQueue(queue) {
@@ -489,7 +656,7 @@ function renderReviewQueue(queue) {
         <span class="pill">${formatDate(item.createdAt)}</span>
       </div>
       <h3>${escapeHtml(item.title || item.projectTitle || item.projectId)}</h3>
-      <p>${escapeHtml(item.studentNames || item.studentId || '-')}</p>
+      ${studentInfoCard(item)}
       <p>${escapeHtml(item.note || 'ไม่มีหมายเหตุจากนักเรียน')}</p>
       <div class="review-actions">
         ${item.canViewFile !== false && item.fileUrl ? `<a class="mini-button link" href="${escapeAttribute(item.fileUrl)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}
@@ -500,6 +667,34 @@ function renderReviewQueue(queue) {
       </div>
     </article>
   `).join('');
+}
+
+function studentInfoCard(item) {
+  const name = item.studentNames || item.studentId || 'นักเรียน';
+  const studentId = item.studentId || '-';
+  const meta = [
+    `รหัส ${studentId}`,
+    item.studentPhone ? `โทร ${item.studentPhone}` : '',
+    item.studentSchool || ''
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="student-review-profile">
+      ${avatarMarkup(item.studentPhotoUrl, name, 'student-review-avatar')}
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <small>${escapeHtml(meta || '-')}</small>
+      </div>
+    </div>
+  `;
+}
+
+function avatarMarkup(photoUrl, name, className) {
+  const initial = String(name || 'U').trim().charAt(0).toUpperCase();
+  return `
+    <span class="${escapeAttribute(className || 'avatar-mark')} ${photoUrl ? 'has-photo' : ''}">
+      ${photoUrl ? `<img src="${escapeAttribute(photoUrl)}" alt="${escapeAttribute(name || 'รูปโปรไฟล์')}">` : escapeHtml(initial)}
+    </span>
+  `;
 }
 
 function renderRequests(requests, stats) {
@@ -1183,6 +1378,82 @@ async function api(action, payload = {}) {
   return data.data || {};
 }
 
+function triggerProfilePhotoPicker() {
+  const user = state.auth?.user;
+  if (!user || user.role !== 'student') return;
+  const input = document.getElementById('profilePhotoInput');
+  if (input) input.click();
+}
+
+async function handleProfilePhotoChange(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+
+  try {
+    if (!file.type.startsWith('image/')) throw new Error('กรุณาเลือกไฟล์รูปภาพ');
+    const payload = await readImagePayload(file);
+    const result = await api('updateProfilePhoto', payload);
+    state.auth.user = result.user;
+    if (state.dashboard) state.dashboard.user = result.user;
+    syncDashboardPhoto(result.user);
+    saveAuth(state.auth);
+    render();
+    toast('เปลี่ยนรูปโปรไฟล์เรียบร้อยแล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function readImagePayload(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const size = 360;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        const scale = Math.max(size / image.width, size / image.height);
+        const width = image.width * scale;
+        const height = image.height * scale;
+        const x = (size - width) / 2;
+        const y = (size - height) / 2;
+        context.fillStyle = '#f8fafc';
+        context.fillRect(0, 0, size, size);
+        context.drawImage(image, x, y, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+        resolve({
+          fileName: file.name || `profile-${Date.now()}.jpg`,
+          fileMimeType: 'image/jpeg',
+          fileData: dataUrl.split(',').pop()
+        });
+      };
+      image.onerror = () => reject(new Error('อ่านรูปภาพไม่สำเร็จ'));
+      image.src = String(reader.result || '');
+    };
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function syncDashboardPhoto(user) {
+  if (!state.dashboard || !user) return;
+  const keys = [user.userId, user.studentId, user.email].filter(Boolean).map(value => String(value).toLowerCase());
+  (state.dashboard.projects || []).forEach(project => {
+    (project.students || []).forEach(student => {
+      const studentKeys = [student.userId, student.studentId].filter(Boolean).map(value => String(value).toLowerCase());
+      if (studentKeys.some(key => keys.includes(key))) student.photoUrl = user.photoUrl || '';
+    });
+  });
+  (state.dashboard.submissions || []).forEach(submission => {
+    const submissionKey = String(submission.studentId || '').toLowerCase();
+    if (keys.includes(submissionKey)) submission.studentPhotoUrl = user.photoUrl || '';
+  });
+}
+
 function readFilePayload(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1230,7 +1501,8 @@ function renderLoadingShell() {
   elements.workspaceSubtitle.textContent = 'กำลังเตรียมข้อมูลการส่งโครงงาน';
   elements.userName.textContent = user.name || 'กำลังโหลด';
   elements.userEmail.textContent = user.email || user.userId || '-';
-  elements.userInitial.textContent = (user.name || user.userId || 'U').trim().charAt(0).toUpperCase();
+  ensureProfileShell();
+  setAvatarContent(elements.userInitial, user.photoUrl || '', userInitialText(user), user.name || 'ผู้ใช้งาน');
   elements.statsGrid.innerHTML = [1, 2, 3, 4].map(() => `
     <div class="stat-card skeleton-card">
       <span></span>
@@ -1373,7 +1645,7 @@ function getDemoStore() {
   const data = {
     users: [
       { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com', mustChangePassword: false },
-      { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', phone: '0818834211', mustChangePassword: true },
+      { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', phone: '0818834211', photoUrl: '', mustChangePassword: true },
       { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
     ],
     projects: [
@@ -1438,6 +1710,15 @@ async function demoApi(action, payload) {
     if (payload.newPassword === payload.currentPassword) throw new Error('กรุณาตั้งรหัสผ่านใหม่ที่ไม่ซ้ำกับรหัสเดิม');
     user.password = payload.newPassword;
     user.mustChangePassword = false;
+    setDemoStore(store);
+    const { password, ...safeUser } = user;
+    return { user: safeUser };
+  }
+
+  if (action === 'updateProfilePhoto') {
+    const user = findDemoUser(store, state.auth.user.userId);
+    if (!user || user.role !== 'student') throw new Error('เฉพาะนักเรียนเท่านั้นที่เปลี่ยนรูปโปรไฟล์ได้');
+    user.photoUrl = `data:${payload.fileMimeType || 'image/jpeg'};base64,${payload.fileData}`;
     setDemoStore(store);
     const { password, ...safeUser } = user;
     return { user: safeUser };
@@ -1574,14 +1855,32 @@ function generateDemoPassword() {
 }
 
 function demoDashboard(store, user) {
-  const projects = filterProjects(store.projects, user);
+  const projects = filterProjects(store.projects, user).map(project => ({
+    ...project,
+    students: splitValues(project.studentIds).map((studentId, index) => {
+      const student = findDemoUser(store, studentId) || {};
+      const names = splitValues(project.studentNames);
+      return {
+        studentId,
+        userId: student.userId || studentId,
+        name: student.name || names[index] || studentId,
+        photoUrl: student.photoUrl || '',
+        phone: student.phone || '',
+        school: student.school || project.school || ''
+      };
+    })
+  }));
   const allowedIds = new Set(projects.map(item => item.projectId));
   const submissions = store.submissions.filter(item => user.role === 'admin' || allowedIds.has(item.projectId)).map(item => {
     const project = projects.find(projectItem => projectItem.projectId === item.projectId) || {};
+    const student = findDemoUser(store, item.studentId) || {};
     const canReview = user.role === 'admin' || (user.role === 'advisor' && project.advisorId === user.userId);
     const canViewFile = user.role === 'admin' || user.role === 'student' || canReview;
     return {
       ...item,
+      studentPhotoUrl: student.photoUrl || '',
+      studentPhone: student.phone || '',
+      studentSchool: student.school || project.school || '',
       canReview,
       canViewFile,
       fileUrl: canViewFile ? item.fileUrl : ''
