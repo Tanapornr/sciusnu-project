@@ -338,18 +338,51 @@ a {
 
 .workspace {
   display: grid;
+  align-content: start;
   gap: 1.05rem;
 }
 
 .topbar {
+  position: relative;
+  overflow: hidden;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
+  min-height: clamp(190px, 22vw, 260px);
   padding: clamp(1.25rem, 3vw, 2rem);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.76)),
     radial-gradient(circle at right, rgba(15, 118, 110, 0.1), transparent 28rem);
+}
+
+.topbar::before,
+.topbar::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.topbar::before {
+  width: 18rem;
+  height: 18rem;
+  right: 14rem;
+  top: -8rem;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.topbar::after {
+  width: 12rem;
+  height: 12rem;
+  right: 2rem;
+  bottom: -5rem;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.topbar > * {
+  position: relative;
+  z-index: 1;
 }
 
 .topbar h1 {
@@ -388,6 +421,7 @@ a {
 
 .view-panel {
   display: grid;
+  align-content: start;
   gap: 1rem;
 }
 
@@ -427,6 +461,27 @@ a {
   margin-top: 0.35rem;
   font-size: 2.1rem;
   letter-spacing: -0.07em;
+}
+
+.skeleton-card span,
+.skeleton-card strong {
+  display: block;
+  overflow: hidden;
+  border-radius: 999px;
+  color: transparent;
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7), rgba(255, 255, 255, 0.92), rgba(226, 232, 240, 0.7));
+  background-size: 220% 100%;
+  animation: shimmer 1.45s ease-in-out infinite;
+}
+
+.skeleton-card span {
+  width: 44%;
+  height: 0.9rem;
+}
+
+.skeleton-card strong {
+  width: 34%;
+  height: 2.1rem;
 }
 
 .two-column {
@@ -686,6 +741,46 @@ a {
   background: rgba(255, 255, 255, 0.46);
   text-align: center;
   line-height: 1.7;
+}
+
+.loading-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  border: 1px dashed rgba(15, 118, 110, 0.2);
+  border-radius: var(--radius-lg);
+  padding: 1.35rem;
+  color: var(--muted);
+  background:
+    radial-gradient(circle at top, rgba(15, 118, 110, 0.08), transparent 16rem),
+    rgba(255, 255, 255, 0.64);
+  text-align: center;
+}
+
+.loading-state span {
+  width: 38px;
+  height: 38px;
+  border: 4px solid rgba(15, 118, 110, 0.14);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.loading-state strong {
+  color: #1f2937;
+}
+
+.loading-state small {
+  color: var(--muted);
+}
+
+@keyframes shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .password-modal {

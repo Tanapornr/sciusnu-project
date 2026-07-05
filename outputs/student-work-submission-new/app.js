@@ -61,10 +61,12 @@ function boot() {
   state.auth = getAuth();
   bindEvents();
 
-  if (state.auth) {
+  if (hasStoredAuth(state.auth)) {
+    renderLoadingShell();
     showApp();
-    loadDashboard();
-    maybeForcePasswordChange();
+    loadDashboard({ restore: true });
+  } else {
+    showLogin();
   }
 }
 
@@ -102,8 +104,10 @@ async function handleLogin(event) {
     });
     state.auth = { token: result.token, user: result.user };
     saveAuth(state.auth);
+    renderLoadingShell();
     showApp();
-    await loadDashboard();
+    const loaded = await loadDashboard({ restore: true });
+    if (!loaded) return;
     if (state.auth.user?.mustChangePassword) {
       showPasswordModal();
       toast('กรุณาเปลี่ยนรหัสผ่านก่อนเริ่มใช้งานครั้งแรก');
@@ -117,7 +121,7 @@ async function handleLogin(event) {
   }
 }
 
-async function loadDashboard() {
+async function loadDashboard(options = {}) {
   try {
     state.dashboard = await api('dashboard');
     if (state.dashboard.user && state.auth) {
@@ -126,8 +130,16 @@ async function loadDashboard() {
     }
     render();
     maybeForcePasswordChange();
+    return true;
   } catch (error) {
+    if (options.restore || isAuthError(error)) {
+      clearAuth();
+      showLogin();
+      toast('เซสชันหมดอายุหรือโหลดข้อมูลไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่', true);
+      return false;
+    }
     toast(error.message, true);
+    return false;
   }
 }
 
@@ -465,9 +477,61 @@ function isDemoMode() {
   return CONFIG.DEMO_MODE || !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.includes('PASTE_');
 }
 
+function hasStoredAuth(auth) {
+  return Boolean(auth && auth.token && auth.user);
+}
+
 function showApp() {
   elements.loginView.classList.add('hidden');
   elements.appView.classList.remove('hidden');
+}
+
+function showLogin() {
+  elements.appView.classList.add('hidden');
+  elements.loginView.classList.remove('hidden');
+  hidePasswordModal();
+}
+
+function renderLoadingShell() {
+  const user = state.auth?.user || {};
+  elements.roleBadge.textContent = 'Loading';
+  elements.workspaceTitle.textContent = 'กำลังโหลดข้อมูลของคุณ';
+  elements.workspaceSubtitle.textContent = 'กำลังเชื่อมต่อ Google Sheet และเตรียมพื้นที่ส่งโครงงาน';
+  elements.userName.textContent = user.name || 'กำลังโหลด';
+  elements.userEmail.textContent = user.email || user.userId || '-';
+  elements.userInitial.textContent = (user.name || user.userId || 'U').trim().charAt(0).toUpperCase();
+  elements.statsGrid.innerHTML = [1, 2, 3, 4].map(() => `
+    <div class="stat-card skeleton-card">
+      <span></span>
+      <strong></strong>
+    </div>
+  `).join('');
+  elements.projectList.innerHTML = loadingState('กำลังโหลดโครงงานและทีมอาจารย์ที่ปรึกษา');
+  elements.submissionList.innerHTML = loadingState('กำลังโหลดประวัติการส่งงาน');
+  elements.reviewQueue.innerHTML = loadingState('กำลังโหลดรายการตรวจงาน');
+  renderSubmitOptions([]);
+  applyRoleVisibility(user.role || 'student');
+}
+
+function loadingState(text) {
+  return `
+    <div class="loading-state">
+      <span></span>
+      <strong>${escapeHtml(text)}</strong>
+      <small>รอสักครู่ ระบบกำลังจัดข้อมูลให้เรียบร้อย</small>
+    </div>
+  `;
+}
+
+function isAuthError(error) {
+  return /เข้าสู่ระบบ|เซสชัน|หมดอายุ|token|session|ไม่ถูกต้อง/i.test(error.message || '');
+}
+
+function clearAuth() {
+  localStorage.removeItem(STORAGE_KEY);
+  state.auth = null;
+  state.dashboard = null;
+  state.view = 'overview';
 }
 
 function maybeForcePasswordChange() {
@@ -488,9 +552,7 @@ function hidePasswordModal() {
 }
 
 function logout() {
-  localStorage.removeItem(STORAGE_KEY);
-  state.auth = null;
-  state.dashboard = null;
+  clearAuth();
   window.location.reload();
 }
 
