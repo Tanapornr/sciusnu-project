@@ -75,6 +75,8 @@ function route_(request) {
   if (action === 'createUser') return createUser_(user, payload);
   if (action === 'createProject') return createProject_(user, payload);
   if (action === 'generateStudentAccounts') return generateStudentAccounts_(user);
+  if (action === 'syncSourceData') return syncSourceData_(user);
+  if (action === 'repairStudentPasswords') return repairStudentPasswords_(user);
 
   throw new Error('ไม่พบคำสั่งที่ต้องการ');
 }
@@ -349,6 +351,167 @@ function generateStudentAccounts_(user) {
 
   audit_(user.userId, 'generateStudentAccounts', String(credentials.length));
   return { credentials: credentials };
+}
+
+function syncSourceData_(user) {
+  requireAdmin_(user);
+  return syncSourceDataFromSheet1_();
+}
+
+function repairStudentPasswords_(user) {
+  requireAdmin_(user);
+  return repairStudentPasswordDisplay_();
+}
+
+function syncSourceDataManual_() {
+  ensureSheets_();
+  return syncSourceDataFromSheet1_();
+}
+
+function syncSourceDataManual() {
+  return syncSourceDataManual_();
+}
+
+function syncSourceDataFromSheet1_() {
+  var spreadsheet = SpreadsheetApp.openById(SETTINGS.spreadsheetId);
+  var source = spreadsheet.getSheetByName('sheet1');
+  if (!source) throw new Error('ไม่พบแท็บ sheet1');
+
+  var values = source.getDataRange().getValues();
+  if (values.length <= 1) throw new Error('sheet1 ยังไม่มีข้อมูลนำเข้า');
+
+  ensureSheets_();
+  var now = new Date().toISOString();
+  var users = readRows_(SHEETS.users);
+  var existingUsers = {};
+  users.forEach(function (item) {
+    [item.userId, item.email, item.studentId].forEach(function (value) {
+      if (value) existingUsers[String(value).trim().toLowerCase()] = true;
+    });
+  });
+
+  var projects = readRows_(SHEETS.projects);
+  var existingProjects = {};
+  projects.forEach(function (project) {
+    if (project.projectId) existingProjects[String(project.projectId).trim()] = true;
+  });
+
+  var groupedProjects = {};
+  var staff = {};
+  var createdStudents = 0;
+  var createdStaff = 0;
+
+  values.slice(1).forEach(function (row) {
+    var studentEmail = clean_(row[0]);
+    var studentId = clean_(row[1]);
+    var firstName = clean_(row[2]);
+    var lastName = clean_(row[3]);
+    var major = clean_(row[4]);
+    var projectId = clean_(row[5]);
+    var advisorEmail = clean_(row[8]);
+    var advisorName = clean_(row[9]);
+    var advisorOrg = clean_(row[10]) || clean_(row[11]);
+    var coAdvisorEmail = clean_(row[12]);
+    var coAdvisorName = clean_(row[13]);
+    var coAdvisorOrg = clean_(row[14]);
+    var schoolAdvisorEmail = clean_(row[15]);
+    var schoolAdvisorName = clean_(row[16]);
+    var title = clean_(row[17]);
+    if (!studentId || !projectId) return;
+
+    var studentName = [firstName, lastName].filter(Boolean).join(' ') || studentId;
+    if (!existingUsers[String(studentId).toLowerCase()]) {
+      appendRow_(SHEETS.users, {
+        userId: studentId,
+        password: generateStudentPassword_(),
+        role: 'student',
+        name: studentName,
+        email: studentEmail,
+        studentId: studentId,
+        school: major,
+        active: 'TRUE',
+        createdAt: now,
+        updatedAt: now,
+        mustChangePassword: 'TRUE',
+        passwordUpdatedAt: ''
+      });
+      existingUsers[String(studentId).toLowerCase()] = true;
+      if (studentEmail) existingUsers[String(studentEmail).toLowerCase()] = true;
+      createdStudents += 1;
+    }
+
+    var advisorId = collectStaff_(staff, existingUsers, 'advisor', advisorName, advisorEmail, advisorOrg, projectId);
+    var coAdvisorId = collectStaff_(staff, existingUsers, 'co_advisor', coAdvisorName, coAdvisorEmail, coAdvisorOrg, projectId);
+    var schoolAdvisorId = collectStaff_(staff, existingUsers, 'school_advisor', schoolAdvisorName, schoolAdvisorEmail, '', projectId);
+
+    if (!groupedProjects[projectId]) {
+      groupedProjects[projectId] = {
+        projectId: projectId,
+        title: title || projectId,
+        studentIds: [],
+        studentNames: [],
+        advisorId: advisorId,
+        coAdvisorId: coAdvisorId,
+        schoolAdvisorId: schoolAdvisorId,
+        school: major,
+        dueDate: '',
+        status: 'กำลังดำเนินการ',
+        createdAt: now,
+        updatedAt: now
+      };
+    }
+    groupedProjects[projectId].studentIds.push(studentId);
+    groupedProjects[projectId].studentNames.push(studentName);
+    groupedProjects[projectId].advisorId = groupedProjects[projectId].advisorId || advisorId;
+    groupedProjects[projectId].coAdvisorId = groupedProjects[projectId].coAdvisorId || coAdvisorId;
+    groupedProjects[projectId].schoolAdvisorId = groupedProjects[projectId].schoolAdvisorId || schoolAdvisorId;
+  });
+
+  Object.keys(staff).forEach(function (key) {
+    var item = staff[key];
+    if (existingUsers[String(item.userId).toLowerCase()]) return;
+    appendRow_(SHEETS.users, {
+      userId: item.userId,
+      password: generatePassword_(),
+      role: item.role,
+      name: item.name,
+      email: item.email,
+      studentId: '',
+      school: item.school,
+      active: 'TRUE',
+      createdAt: now,
+      updatedAt: now,
+      mustChangePassword: item.email ? 'FALSE' : 'TRUE',
+      passwordUpdatedAt: ''
+    });
+    existingUsers[String(item.userId).toLowerCase()] = true;
+    if (item.email) existingUsers[String(item.email).toLowerCase()] = true;
+    createdStaff += 1;
+  });
+
+  var createdProjects = 0;
+  Object.keys(groupedProjects).forEach(function (projectId) {
+    if (existingProjects[projectId]) return;
+    var project = groupedProjects[projectId];
+    project.studentIds = unique_(project.studentIds).join(', ');
+    project.studentNames = unique_(project.studentNames).join(', ');
+    appendRow_(SHEETS.projects, project);
+    existingProjects[projectId] = true;
+    createdProjects += 1;
+  });
+
+  var missingEmailRows = Object.keys(staff).map(function (key) { return staff[key]; }).filter(function (item) {
+    return !item.email;
+  });
+  writeMissingAdvisorEmails_(spreadsheet, missingEmailRows);
+  audit_('system', 'syncSourceData', 'students=' + createdStudents + ', staff=' + createdStaff + ', projects=' + createdProjects);
+
+  return {
+    createdStudents: createdStudents,
+    createdStaff: createdStaff,
+    createdProjects: createdProjects,
+    missingAdvisorEmails: missingEmailRows.length
+  };
 }
 
 function normalizeNewUser_(payload) {
@@ -647,6 +810,7 @@ function ensureSheets_() {
       passwordUpdatedAt: ''
     });
   }
+  formatUsersSheet_();
 }
 
 function getSheet_(definition) {
@@ -673,6 +837,15 @@ function getSheet_(definition) {
     }
   }
   return sheet;
+}
+
+function formatUsersSheet_() {
+  var sheet = getSheet_(SHEETS.users);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  ['userId', 'password', 'studentId'].forEach(function (header) {
+    var index = headers.indexOf(header);
+    if (index !== -1) sheet.getRange(1, index + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+  });
 }
 
 function readRows_(definition) {
@@ -737,6 +910,84 @@ function split_(value) {
   return String(value || '').split(',').map(function (item) {
     return item.trim();
   }).filter(Boolean);
+}
+
+function clean_(value) {
+  return String(value || '').trim();
+}
+
+function collectStaff_(staff, existingUsers, role, name, email, school, projectId) {
+  if (!name && !email) return '';
+  var userId = email || name;
+  var key = role + '|' + String(userId).toLowerCase();
+  if (!staff[key] && !existingUsers[String(userId).toLowerCase()]) {
+    staff[key] = {
+      userId: userId,
+      role: role,
+      name: name || email,
+      email: email,
+      school: school || '',
+      projects: []
+    };
+  }
+  if (staff[key]) staff[key].projects.push(projectId);
+  return userId;
+}
+
+function unique_(items) {
+  var seen = {};
+  return items.filter(function (item) {
+    var key = String(item || '').trim();
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
+function writeMissingAdvisorEmails_(spreadsheet, rows) {
+  var sheetName = 'NEW_MissingAdvisorEmails';
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
+  sheet.clear();
+  var values = [['role', 'name', 'temporaryUser', 'emailToFill', 'projects']];
+  rows.forEach(function (item) {
+    values.push([
+      item.role,
+      item.name,
+      item.userId,
+      '',
+      unique_(item.projects).join(', ')
+    ]);
+  });
+  sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+  sheet.setFrozenRows(1);
+}
+
+function repairStudentPasswordDisplay_() {
+  var sheet = getSheet_(SHEETS.users);
+  formatUsersSheet_();
+  var values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return { repaired: 0 };
+
+  var headers = values[0];
+  var passwordIndex = headers.indexOf('password');
+  var roleIndex = headers.indexOf('role');
+  if (passwordIndex === -1 || roleIndex === -1) return { repaired: 0 };
+
+  var repaired = 0;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    if (String(values[rowIndex][roleIndex]) !== 'student') continue;
+    var password = String(values[rowIndex][passwordIndex] || '').trim();
+    if (!password) password = generateStudentPassword_();
+    if (/^\d+$/.test(password) && password.length < 4) {
+      password = ('0000' + password).slice(-4);
+    }
+    if (/^\d{4}$/.test(password)) {
+      sheet.getRange(rowIndex + 1, passwordIndex + 1).setNumberFormat('@').setValue(password);
+      repaired += 1;
+    }
+  }
+  return { repaired: repaired };
 }
 
 function generatePassword_() {
