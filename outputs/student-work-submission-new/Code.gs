@@ -182,11 +182,16 @@ function submitWork_(user, payload) {
     throw new Error('บัญชีนี้ไม่ได้อยู่ในโครงงานที่เลือก');
   }
 
-  if (!payload.title) throw new Error('กรุณากรอกชื่องาน');
+  var submitted = readRows_(SHEETS.submissions).some(function (submission) {
+    return String(submission.projectId) === String(project.projectId);
+  });
+  if (submitted) throw new Error('โครงงานนี้ส่งงานแล้ว ไม่สามารถส่งซ้ำได้');
+
   if (!payload.fileData) throw new Error('กรุณาอัปโหลดไฟล์ PDF');
   validatePdfPayload_(payload);
 
   var now = new Date().toISOString();
+  payload.title = project.title || payload.workType || 'ไฟล์โครงงาน';
   var storedFile = storeSubmissionFile_(project, payload, user);
   var submission = {
     submissionId: 'SUB-' + Utilities.getUuid(),
@@ -258,8 +263,12 @@ function createRequest_(user, payload) {
   }
 
   var ownerSignature = String(user.name || payload.ownerSignature || '').trim();
+  var ownerSignatureImage = String(payload.ownerSignatureImage || '').trim();
   if (!ownerSignature) {
     throw new Error('ไม่พบชื่อผู้ยื่นคำร้องในบัญชีผู้ใช้');
+  }
+  if (!ownerSignatureImage) {
+    throw new Error('กรุณาเซ็นในช่องลายเซ็นอิเล็กทรอนิกส์');
   }
 
   var projects = readRows_(SHEETS.projects);
@@ -275,7 +284,7 @@ function createRequest_(user, payload) {
 
   var now = new Date().toISOString();
   var users = readRows_(SHEETS.users);
-  var signatures = buildRequestSigners_(project, user, users, now, ownerSignature);
+  var signatures = buildRequestSigners_(project, user, users, now, ownerSignature, ownerSignatureImage);
   var nextSigner = nextUnsignedSigner_(signatures);
   var requestPayload = {
     requesterName: user.name || '',
@@ -331,8 +340,10 @@ function createRequest_(user, payload) {
 function signRequest_(user, payload) {
   var requestId = String(payload.requestId || '').trim();
   var signature = String(user.name || payload.signature || '').trim();
+  var signatureImage = String(payload.signatureImage || '').trim();
   if (!requestId) throw new Error('ไม่พบเลขคำร้อง');
   if (!signature) throw new Error('ไม่พบชื่อผู้เซ็นในบัญชีผู้ใช้');
+  if (!signatureImage) throw new Error('กรุณาเซ็นในช่องลายเซ็นอิเล็กทรอนิกส์');
 
   var requests = readRows_(SHEETS.requests);
   var request = requests.filter(function (item) { return item.requestId === requestId; })[0];
@@ -354,6 +365,7 @@ function signRequest_(user, payload) {
   currentSigner.status = 'signed';
   currentSigner.signedAt = now;
   currentSigner.signature = signature;
+  currentSigner.signatureImage = signatureImage;
   currentSigner.signedBy = user.userId;
   currentSigner.signedName = user.name;
 
@@ -924,7 +936,7 @@ function validateRequestPayload_(requestType, payload, project) {
   }
 }
 
-function buildRequestSigners_(project, requester, users, now, ownerSignature) {
+function buildRequestSigners_(project, requester, users, now, ownerSignature, ownerSignatureImage) {
   var signatures = [];
   var seen = {};
 
@@ -943,6 +955,7 @@ function buildRequestSigners_(project, requester, users, now, ownerSignature) {
       status: signed ? 'signed' : 'pending',
       signedAt: signed ? now : '',
       signature: signed ? (ownerSignature || requester.name) : '',
+      signatureImage: signed ? (ownerSignatureImage || '') : '',
       signedBy: signed ? requester.userId : '',
       signedName: signed ? requester.name : ''
     });
@@ -1105,17 +1118,15 @@ function generateRequestPdf_(request, project, users) {
 
   body.appendParagraph('');
   body.appendParagraph('ลำดับลายเซ็นอิเล็กทรอนิกส์').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  var signatureRows = [['ลำดับ', 'บทบาท', 'ชื่อผู้เซ็น', 'ลายเซ็น', 'วันเวลา']];
+  var signatureTable = body.appendTable([['ลำดับ', 'บทบาท', 'ชื่อผู้เซ็น', 'ลายเซ็น', 'วันเวลา']]);
   signatures.forEach(function (signer, index) {
-    signatureRows.push([
-      String(index + 1),
-      signer.label || signer.role || '-',
-      signer.name || '-',
-      signer.signature || signer.signedName || '-',
-      formatThaiDateTime_(signer.signedAt)
-    ]);
+    var row = signatureTable.appendTableRow();
+    row.appendTableCell(String(index + 1));
+    row.appendTableCell(signer.label || signer.role || '-');
+    row.appendTableCell(signer.name || '-');
+    appendSignatureToCell_(row.appendTableCell(''), signer);
+    row.appendTableCell(formatThaiDateTime_(signer.signedAt));
   });
-  body.appendTable(signatureRows);
   body.appendParagraph('');
   body.appendParagraph('เอกสารนี้สร้างโดยระบบอัตโนมัติหลังผู้เกี่ยวข้องเซ็นครบทุกลำดับ');
 
@@ -1131,6 +1142,25 @@ function generateRequestPdf_(request, project, users) {
     url: pdfFile.getUrl(),
     name: pdfFile.getName()
   };
+}
+
+function appendSignatureToCell_(cell, signer) {
+  var imageBlob = signatureImageBlob_(signer.signatureImage, signer.name || signer.signedName || 'signature');
+  if (imageBlob) {
+    var image = cell.appendImage(imageBlob);
+    image.setWidth(120);
+  }
+  cell.appendParagraph(signer.signature || signer.signedName || '-');
+}
+
+function signatureImageBlob_(dataUrl, name) {
+  var match = String(dataUrl || '').match(/^data:image\/png;base64,(.+)$/);
+  if (!match) return null;
+  return Utilities.newBlob(
+    Utilities.base64Decode(match[1]),
+    'image/png',
+    sanitizeFileName_((name || 'signature') + '.png')
+  );
 }
 
 function requestPdfDetail_(request, payload, project) {

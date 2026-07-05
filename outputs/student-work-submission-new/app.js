@@ -249,6 +249,9 @@ async function handleSubmitWork(event) {
   setBusy(elements.submitButton, true, 'กำลังส่งงาน...');
 
   try {
+    if (projectHasSubmission(elements.submitProject.value)) {
+      throw new Error('โครงงานนี้ส่งงานแล้ว ไม่สามารถส่งซ้ำได้');
+    }
     const selectedFile = elements.submissionFile.files[0];
     if (!selectedFile) throw new Error('กรุณาอัปโหลดไฟล์ PDF');
     if (!isPdfFile(selectedFile)) throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
@@ -257,7 +260,6 @@ async function handleSubmitWork(event) {
     await api('submitWork', {
       projectId: elements.submitProject.value,
       workType: document.getElementById('workType').value,
-      title: document.getElementById('submissionTitle').value.trim(),
       note: document.getElementById('studentNote').value.trim(),
       ...filePayload
     });
@@ -270,6 +272,7 @@ async function handleSubmitWork(event) {
     toast(error.message, true);
   } finally {
     setBusy(elements.submitButton, false, 'ส่งงานให้อาจารย์');
+    updateSelectedProjectTitle();
   }
 }
 
@@ -677,15 +680,18 @@ async function nextRequestStep() {
     }
     if (state.requestWizard.step === 3) {
       const signature = state.auth?.user?.name || '';
+      const signatureImage = readSignaturePad('ownerSignaturePad');
       const accepted = document.getElementById('ownerSignatureConfirm').checked;
       if (!signature) throw new Error('ไม่พบชื่อผู้ยื่นคำร้องในบัญชีผู้ใช้');
+      if (!signatureImage) throw new Error('กรุณาเซ็นในช่องลายเซ็นอิเล็กทรอนิกส์');
       if (!accepted) throw new Error('กรุณายืนยันการเซ็นอิเล็กทรอนิกส์');
       state.requestWizard.submitting = true;
       renderRequestModal();
       await api('createRequest', {
         ...state.requestWizard.payload,
         requestType: state.requestWizard.type,
-        ownerSignature: signature
+        ownerSignature: signature,
+        ownerSignatureImage: signatureImage
       });
       await loadDashboard();
       state.requestWizard.step = 4;
@@ -724,6 +730,7 @@ function renderRequestModal() {
     elements.requestModalBody.innerHTML = requestSignatureStepMarkup();
     elements.requestBackButton.textContent = 'ย้อนกลับ';
     elements.requestNextButton.textContent = state.requestWizard.submitting ? 'กำลังส่งคำร้อง...' : 'ส่งคำร้องและเซ็น';
+    requestAnimationFrame(() => prepareSignaturePads(elements.requestModalBody));
   }
   if (step === 4) {
     elements.requestModalBody.innerHTML = `
@@ -853,6 +860,14 @@ function requestSignatureStepMarkup() {
         <strong>${escapeHtml(user.name || '-')}</strong>
         <small>ระบบดึงชื่อจากบัญชีที่เข้าสู่ระบบ ไม่ต้องพิมพ์ชื่อซ้ำ</small>
       </div>
+      <div class="signature-pad-card">
+        <div>
+          <strong>ช่องเซ็นอิเล็กทรอนิกส์</strong>
+          <span>ใช้เมาส์ ปากกา หรือแตะหน้าจอเพื่อเซ็นในกรอบนี้</span>
+        </div>
+        <canvas id="ownerSignaturePad" class="signature-canvas" data-signature-pad width="640" height="190" aria-label="ช่องเซ็นอิเล็กทรอนิกส์"></canvas>
+        <button class="mini-button link" type="button" data-signature-clear="#ownerSignaturePad">ล้างลายเซ็น</button>
+      </div>
       <label class="check-line">
         <input id="ownerSignatureConfirm" type="checkbox">
         <span>ข้าพเจ้าขอยืนยันว่าข้อมูลในคำร้องนี้ถูกต้อง และยอมรับการใช้ลายเซ็นอิเล็กทรอนิกส์</span>
@@ -936,15 +951,150 @@ function updateRequestCurrentBranch() {
   branchInput.value = project?.school || '';
 }
 
+function prepareSignaturePads(root = document) {
+  root.querySelectorAll('[data-signature-pad]').forEach(canvas => setupSignaturePad(canvas));
+  root.querySelectorAll('[data-signature-clear]').forEach(button => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
+    button.addEventListener('click', () => {
+      const canvas = root.querySelector(button.dataset.signatureClear) || document.querySelector(button.dataset.signatureClear);
+      canvas?.signaturePad?.clear();
+    });
+  });
+}
+
+function setupSignaturePad(canvas) {
+  if (!canvas || canvas.signaturePad) return;
+  const context = canvas.getContext('2d');
+  let drawing = false;
+  let hasInk = false;
+
+  const paintBackground = () => {
+    context.save();
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+  };
+
+  const resetStyle = () => {
+    context.lineWidth = 3;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.strokeStyle = '#0f172a';
+  };
+
+  paintBackground();
+  resetStyle();
+
+  const pointFromEvent = event => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height
+    };
+  };
+
+  const start = event => {
+    event.preventDefault();
+    drawing = true;
+    hasInk = true;
+    const point = pointFromEvent(event);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+  };
+
+  const move = event => {
+    if (!drawing) return;
+    event.preventDefault();
+    const point = pointFromEvent(event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  };
+
+  const end = event => {
+    if (!drawing) return;
+    event.preventDefault();
+    drawing = false;
+  };
+
+  canvas.addEventListener('pointerdown', start);
+  canvas.addEventListener('pointermove', move);
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointerleave', end);
+  canvas.signaturePad = {
+    clear() {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      paintBackground();
+      resetStyle();
+      hasInk = false;
+    },
+    dataUrl() {
+      return hasInk ? canvas.toDataURL('image/png') : '';
+    }
+  };
+}
+
+function readSignaturePad(id) {
+  const canvas = typeof id === 'string' ? document.getElementById(id) : id;
+  return canvas?.signaturePad?.dataUrl() || '';
+}
+
+function openSignatureCapture(title) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'signature-capture-modal';
+    modal.innerHTML = `
+      <section class="signature-capture-card glass-card">
+        <header>
+          <div>
+            <span class="eyebrow">Signature</span>
+            <h2>${escapeHtml(title)}</h2>
+            <p>เซ็นในกรอบด้านล่างเพื่อยืนยันคำร้องแบบอิเล็กทรอนิกส์</p>
+          </div>
+          <button class="icon-button" type="button" data-signature-cancel aria-label="ปิด">×</button>
+        </header>
+        <canvas id="signerSignaturePad" class="signature-canvas" data-signature-pad width="640" height="190" aria-label="ช่องเซ็นอิเล็กทรอนิกส์"></canvas>
+        <div class="signature-capture-actions">
+          <button class="secondary-button" type="button" data-signature-clear="#signerSignaturePad">ล้างลายเซ็น</button>
+          <button class="primary-button" type="button" data-signature-confirm>ยืนยันลายเซ็น</button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+    prepareSignaturePads(modal);
+
+    const close = value => {
+      modal.remove();
+      resolve(value);
+    };
+
+    modal.addEventListener('click', event => {
+      if (event.target === modal || event.target.closest('[data-signature-cancel]')) {
+        close('');
+        return;
+      }
+      if (event.target.closest('[data-signature-confirm]')) {
+        const signatureImage = readSignaturePad(modal.querySelector('#signerSignaturePad'));
+        if (!signatureImage) {
+          toast('กรุณาเซ็นในช่องลายเซ็นก่อนยืนยัน', true);
+          return;
+        }
+        close(signatureImage);
+      }
+    });
+  });
+}
+
 async function signRequest(requestId) {
   const signature = state.auth?.user?.name || '';
   if (!signature) {
     toast('ไม่พบชื่อผู้เซ็นในบัญชีผู้ใช้', true);
     return;
   }
-  if (!window.confirm(`ยืนยันการเซ็นอิเล็กทรอนิกส์โดย ${signature}`)) return;
+  const signatureImage = await openSignatureCapture(`เซ็นโดย ${signature}`);
+  if (!signatureImage) return;
   try {
-    await api('signRequest', { requestId, signature });
+    await api('signRequest', { requestId, signature, signatureImage });
     toast('เซ็นคำร้องเรียบร้อย และแจ้งผู้เซ็นลำดับถัดไปแล้ว');
     await loadDashboard();
   } catch (error) {
@@ -963,16 +1113,26 @@ function updateSelectedProjectTitle() {
   if (!elements.selectedProjectTitle) return;
   const selectedProjectId = elements.submitProject.value;
   const project = (state.dashboard?.projects || []).find(item => item.projectId === selectedProjectId);
+  const submitted = projectHasSubmission(selectedProjectId);
   if (!project) {
     elements.selectedProjectTitle.classList.add('hidden');
     elements.selectedProjectTitle.innerHTML = '';
+    elements.submitButton.disabled = true;
     return;
   }
   elements.selectedProjectTitle.classList.remove('hidden');
+  elements.selectedProjectTitle.classList.toggle('is-submitted', submitted);
   elements.selectedProjectTitle.innerHTML = `
     <strong>${escapeHtml(project.title || project.projectId)}</strong>
-    <small>รหัสโครงงาน ${escapeHtml(project.projectId)}</small>
+    <small>รหัสโครงงาน ${escapeHtml(project.projectId)}${submitted ? ' · ส่งงานแล้ว' : ''}</small>
   `;
+  elements.submitButton.disabled = submitted;
+  elements.submitButton.textContent = submitted ? 'ส่งงานแล้ว' : 'ส่งงานให้อาจารย์';
+}
+
+function projectHasSubmission(projectId) {
+  if (!projectId) return false;
+  return (state.dashboard?.submissions || []).some(item => item.projectId === projectId);
 }
 
 function applyRoleVisibility(role) {
@@ -1286,12 +1446,13 @@ async function demoApi(action, payload) {
   if (action === 'submitWork') {
     const project = store.projects.find(item => item.projectId === payload.projectId);
     const now = new Date().toISOString();
+    if (store.submissions.some(item => item.projectId === payload.projectId)) throw new Error('โครงงานนี้ส่งงานแล้ว ไม่สามารถส่งซ้ำได้');
     if (!payload.fileName || !String(payload.fileName).toLowerCase().endsWith('.pdf')) throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
     const fileUrl = `https://drive.google.com/demo/${encodeURIComponent(payload.fileName)}`;
     store.submissions.unshift({
       submissionId: `S-${Date.now()}`,
       projectId: payload.projectId,
-      title: payload.title,
+      title: project?.title || payload.workType || 'ไฟล์โครงงาน',
       workType: payload.workType,
       fileUrl,
       note: payload.note,
