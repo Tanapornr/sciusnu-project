@@ -9,19 +9,324 @@ function getApiUrl() {
 }
 
 async function api(action, payload = {}) {
-  const response = await fetch(getApiUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8'
-    },
-    body: JSON.stringify({ action, payload })
+  if (action === 'login') {
+    return legacyLogin(payload);
+  }
+
+  if (action === 'dashboard') {
+    return legacyDashboard();
+  }
+
+  if (action === 'reviewSubmission') {
+    return legacyReviewSubmission(payload);
+  }
+
+  if (action === 'submitProjectFile') {
+    return legacySubmitProjectFile(payload);
+  }
+
+  if (action === 'submitRequest') {
+    return legacySubmitRequest(payload);
+  }
+
+  if (action === 'reviewRequest' || action === 'sendPendingReminder') {
+    return { ok: true, count: 0 };
+  }
+
+  throw new Error('ไม่รองรับคำสั่งนี้');
+}
+
+async function legacyLogin(payload) {
+  const data = await postLegacy({
+    action: 'login',
+    username: payload.account,
+    password: payload.password
   });
 
-  const data = await response.json();
-  if (!data.ok) {
-    throw new Error(data.message || 'เกิดข้อผิดพลาด');
+  if (data.status !== 'success') {
+    throw new Error(data.message || 'เข้าสู่ระบบไม่สำเร็จ');
   }
-  return data;
+
+  const role = normalizeRole(data.role, data.email);
+  const user = {
+    role,
+    roleLabel: roleLabel(role),
+    viewerType: role === 'viewer' ? 'viewer' : '',
+    name: data.name || data.email || payload.account,
+    email: data.email || '',
+    studentId: data.studentId || '',
+    projectCode: '',
+    projectCodes: [],
+    page: pageForRole(role)
+  };
+
+  return {
+    ok: true,
+    token: data.email || data.studentId || payload.account,
+    user,
+    page: user.page
+  };
+}
+
+async function legacyDashboard() {
+  const auth = getAuth();
+  const data = await getLegacy();
+
+  if (data.status !== 'success') {
+    throw new Error(data.message || 'โหลดข้อมูลไม่สำเร็จ');
+  }
+
+  const projectsRaw = data.projects || [];
+  const submissionsRaw = data.submissions || [];
+  const user = auth && auth.user ? auth.user : {};
+  const visibleProjects = filterProjectsForUser(projectsRaw, user);
+  const visibleCodes = new Set(visibleProjects.map(project => getValue(project, ['รหัสโครงงาน', 'projectCode', 'projectId'])));
+  const projects = groupProjects(visibleProjects);
+  const submissions = submissionsRaw
+    .filter(item => !visibleCodes.size || visibleCodes.has(getValue(item, ['รหัสโครงงาน', 'projectCode', 'projectId'])))
+    .map(publicLegacySubmission)
+    .sort((a, b) => String(b.updatedAtRaw).localeCompare(String(a.updatedAtRaw)));
+
+  return {
+    ok: true,
+    session: user,
+    projects,
+    submissions,
+    requests: submissions.filter(item => item.workType === 'แบบคำร้อง').map(item => ({
+      id: item.id,
+      timestamp: item.timestamp,
+      studentId: item.studentId,
+      studentName: item.studentName,
+      projectCode: item.projectCode,
+      requestType: item.workType,
+      fileUrl: item.pdfUrl,
+      status: item.status,
+      studentNote: item.note,
+      adminNote: '',
+      reviewer: item.reviewerName,
+      reviewedAt: item.reviewedAt,
+      updatedAt: item.updatedAt,
+      updatedAtRaw: item.updatedAtRaw
+    })),
+    workTypes: ['ข้อเสนอโครงงาน', 'รายงานความก้าวหน้า', 'รายงานฉบับสมบูรณ์', 'ไฟล์นำเสนอ', 'โปสเตอร์'],
+    requestTypes: ['แบบคำร้อง', 'ขอส่งงานล่าช้า', 'คำร้องอื่น ๆ'],
+    stats: buildLegacyStats(submissions),
+    emailQuota: '-'
+  };
+}
+
+async function legacyReviewSubmission(payload) {
+  const auth = getAuth();
+  const dashboard = await legacyDashboard();
+  const submission = dashboard.submissions.find(item => item.id === payload.submissionId);
+  if (!submission) {
+    throw new Error('ไม่พบรายการส่งงาน');
+  }
+
+  const nextStatus = payload.decision === 'approve' ? 'อนุมัติ' : 'ไม่อนุมัติ';
+  const data = await postLegacy({
+    action: 'updateStatus',
+    studentId: submission.studentId,
+    workType: submission.workType,
+    status: nextStatus,
+    reason: payload.note || '',
+    reviewerEmail: auth && auth.user ? auth.user.email : ''
+  });
+
+  if (data.status !== 'success') {
+    throw new Error(data.message || 'บันทึกผลไม่สำเร็จ');
+  }
+
+  return legacyDashboard();
+}
+
+async function legacySubmitProjectFile(payload) {
+  const auth = getAuth();
+  const dashboard = await legacyDashboard();
+  const project = dashboard.projects[0];
+  const student = project && project.students
+    ? project.students.find(item => item.studentId === auth.user.studentId) || project.students[0]
+    : {};
+  const pdfFile = payload.pdfFile || {};
+  const signatureFile = payload.signatureFile || {};
+  const data = await postLegacy({
+    studentId: auth.user.studentId,
+    firstName: student.firstName || '',
+    lastName: student.lastName || '',
+    projectId: project ? project.projectCode : '',
+    workType: payload.workType,
+    advisorName: project && project.advisor ? project.advisor.name : '',
+    file1Data: pdfFile.data || '',
+    file1Mime: pdfFile.mimeType || 'application/pdf',
+    file2Data: signatureFile.data || '',
+    file2Mime: signatureFile.mimeType || '',
+    previousReason: payload.note || '',
+    reason: payload.note || '',
+    note: payload.note || ''
+  });
+
+  if (data.status !== 'success') {
+    throw new Error(data.message || 'ส่งงานไม่สำเร็จ');
+  }
+
+  return legacyDashboard();
+}
+
+async function legacySubmitRequest(payload) {
+  payload.workType = 'แบบคำร้อง';
+  payload.pdfFile = payload.requestFile;
+  return legacySubmitProjectFile(payload);
+}
+
+async function postLegacy(body) {
+  const response = await fetch(getApiUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body)
+  });
+  return response.json();
+}
+
+async function getLegacy() {
+  const response = await fetch(getApiUrl());
+  return response.json();
+}
+
+function normalizeRole(role, email) {
+  const value = String(role || '').trim().toLowerCase();
+  if (value === 'student' || value === 'admin') return value;
+  if (value === 'advisor' || value === 'advisor_main' || value === 'main_advisor') return 'advisor';
+  if (email) return 'viewer';
+  return 'student';
+}
+
+function roleLabel(role) {
+  return {
+    student: 'นักเรียน',
+    advisor: 'อาจารย์ที่ปรึกษาหลัก',
+    viewer: 'ผู้ดูสถานะ',
+    admin: 'แอดมิน'
+  }[role] || role;
+}
+
+function pageForRole(role) {
+  return {
+    student: 'student.html',
+    advisor: 'advisor.html',
+    viewer: 'viewer.html',
+    admin: 'admin.html'
+  }[role] || 'student.html';
+}
+
+function filterProjectsForUser(projects, user) {
+  if (!user || user.role === 'admin') return projects;
+  if (user.role === 'student') {
+    return projects.filter(project => getValue(project, ['รหัสนักเรียน', 'studentId']) === user.studentId);
+  }
+  const email = String(user.email || '').toLowerCase();
+  return projects.filter(project => [
+    'E-mail อ.ที่ปรึกษา',
+    'E-mail อ.ที่ปรึกษาหลัก',
+    'E-mail อ.ที่ปรึกษาร่วม',
+    'E-mail อ.ที่ปรึกษาโรงเรียน',
+    'advisorEmail',
+    'coAdvisorEmail',
+    'schoolAdvisorEmail'
+  ].some(key => String(project[key] || '').toLowerCase() === email));
+}
+
+function groupProjects(rows) {
+  const groups = new Map();
+  rows.forEach(row => {
+    const projectCode = getValue(row, ['รหัสโครงงาน', 'projectCode', 'projectId']);
+    if (!projectCode) return;
+    if (!groups.has(projectCode)) {
+      groups.set(projectCode, {
+        projectCode,
+        projectTitle: getValue(row, ['ชื่อโครงงาน', 'ชื่อโครงงาน ', 'projectTitle']),
+        students: [],
+        advisor: {
+          code: getValue(row, ['อ. ที่ปรึกษา EN', 'advisorCode']),
+          name: getValue(row, ['อ. ที่ปรึกษา TH', 'อ.ที่ปรึกษาหลัก', 'advisorName']),
+          email: getValue(row, ['E-mail อ.ที่ปรึกษา', 'E-mail อ.ที่ปรึกษาหลัก', 'advisorEmail'])
+        },
+        coAdvisor: {
+          name: getValue(row, ['ที่ปรึกษาร่วม', 'coAdvisorName']),
+          email: getValue(row, ['E-mail อ.ที่ปรึกษาร่วม', 'coAdvisorEmail'])
+        },
+        schoolAdvisor: {
+          name: getValue(row, ['ที่ปรึกษา โรงเรียน', 'schoolAdvisorName']),
+          email: getValue(row, ['E-mail อ.ที่ปรึกษาโรงเรียน', 'schoolAdvisorEmail'])
+        }
+      });
+    }
+    groups.get(projectCode).students.push({
+      studentEmail: getValue(row, ['E-mail นักเรียน', 'studentEmail']),
+      studentId: getValue(row, ['รหัสนักเรียน', 'studentId']),
+      firstName: getValue(row, ['ชื่อ', 'firstName']),
+      lastName: getValue(row, ['นามสกุล', 'lastName']),
+      phone: getValue(row, ['เบอร์โทรศัพท์', 'phone'])
+    });
+  });
+  return Array.from(groups.values());
+}
+
+function publicLegacySubmission(item) {
+  const status = normalizeStatus(getValue(item, ['สถานะ', 'status']));
+  const timestamp = getValue(item, ['Timestamp', 'timestamp', 'วันที่ส่ง']);
+  const projectCode = getValue(item, ['รหัสโครงงาน', 'projectCode', 'projectId']);
+  const studentId = getValue(item, ['รหัสนักเรียน', 'studentId']);
+  const workType = getValue(item, ['ประเภทงาน', 'workType']);
+  return {
+    id: getValue(item, ['Submission ID', 'id']) || [projectCode, studentId, workType, timestamp].join('-'),
+    relatedId: '',
+    timestamp,
+    studentId,
+    studentName: [getValue(item, ['ชื่อ', 'firstName']), getValue(item, ['นามสกุล', 'lastName'])].filter(Boolean).join(' '),
+    projectCode,
+    projectTitle: getValue(item, ['ชื่อโครงงาน', 'ชื่อโครงงาน ', 'projectTitle']),
+    workType,
+    pdfUrl: getValue(item, ['URL ไฟล์เล่ม', 'fileUrl', 'URL']),
+    signatureUrl: getValue(item, ['URL ลายเซ็น', 'signatureUrl']),
+    status,
+    advisorName: getValue(item, ['อ.ที่ปรึกษา', 'advisorName']),
+    advisorEmail: getValue(item, ['E-mail อ.ที่ปรึกษา', 'advisorEmail']),
+    note: getValue(item, ['หมายเหตุ', 'เหตุผล', 'reason', 'note']),
+    reviewerName: getValue(item, ['ผู้ตรวจ', 'reviewerName']),
+    reviewerEmail: getValue(item, ['E-mail ผู้ตรวจ', 'reviewerEmail']),
+    reviewedAt: getValue(item, ['วันที่ตรวจ', 'reviewedAt']),
+    revision: Number(getValue(item, ['ครั้งที่แก้ไข', 'revision']) || 0),
+    phone: getValue(item, ['เบอร์โทรศัพท์', 'phone']),
+    members: getValue(item, ['สมาชิก', 'members']),
+    updatedAt: getValue(item, ['วันที่อัปเดต', 'updatedAt']) || timestamp,
+    updatedAtRaw: getValue(item, ['วันที่อัปเดต', 'updatedAt']) || timestamp,
+    canResubmit: status === 'ไม่อนุมัติ'
+  };
+}
+
+function normalizeStatus(status) {
+  const value = String(status || '').trim();
+  if (value.includes('ไม่อนุมัติ') || value.includes('ต้องแก้')) return 'ไม่อนุมัติ';
+  if (value.includes('อนุมัติ') && !value.includes('ไม่')) return 'อนุมัติแล้ว';
+  if (value.includes('แก้ไข') || value.includes('ตรวจอนุมัติ')) return 'รอการตรวจอนุมัติ';
+  if (!value) return 'ยังไม่ส่ง';
+  return value;
+}
+
+function buildLegacyStats(submissions) {
+  return {
+    total: submissions.length,
+    pending: submissions.filter(item => item.status === 'รอตรวจ' || item.status === 'รออนุมัติ' || item.status === 'รอการตรวจอนุมัติ').length,
+    rejected: submissions.filter(item => item.status === 'ไม่อนุมัติ').length,
+    approved: submissions.filter(item => item.status === 'อนุมัติแล้ว').length
+  };
+}
+
+function getValue(object, keys) {
+  for (const key of keys) {
+    if (object && object[key] != null && object[key] !== '') return String(object[key]).trim();
+  }
+  return '';
 }
 
 function saveAuth(auth) {
