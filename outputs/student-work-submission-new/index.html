@@ -230,6 +230,27 @@
     </main>
   </section>
 
+  <div id="passwordModal" class="password-modal hidden" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+    <form id="changePasswordForm" class="password-card glass-card">
+      <span class="eyebrow">First Login</span>
+      <h2 id="passwordModalTitle">เปลี่ยนรหัสผ่านก่อนเริ่มใช้งาน</h2>
+      <p>ระบบสร้างรหัสผ่าน 4 ตัวให้ครั้งแรก เพื่อความปลอดภัยให้นักเรียนตั้งรหัสใหม่ก่อนส่งงาน</p>
+      <label>
+        รหัสผ่านเดิม
+        <input id="currentPassword" type="password" autocomplete="current-password" inputmode="numeric" required>
+      </label>
+      <label>
+        รหัสผ่านใหม่
+        <input id="changeNewPassword" type="password" autocomplete="new-password" minlength="4" required>
+      </label>
+      <label>
+        ยืนยันรหัสผ่านใหม่
+        <input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="4" required>
+      </label>
+      <button id="changePasswordButton" class="primary-button" type="submit">บันทึกรหัสผ่านใหม่</button>
+    </form>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <script src="config.js"></script>

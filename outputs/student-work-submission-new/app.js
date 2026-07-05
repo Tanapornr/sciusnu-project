@@ -1,6 +1,6 @@
 const CONFIG = window.STUDENT_SUBMIT_CONFIG || {};
 const STORAGE_KEY = 'projectflow_auth_v1';
-const DEMO_KEY = 'projectflow_demo_data_v1';
+const DEMO_KEY = 'projectflow_demo_data_v2';
 
 const roleText = {
   student: 'นักเรียน',
@@ -23,6 +23,12 @@ const elements = {
   loginButton: document.getElementById('loginButton'),
   account: document.getElementById('account'),
   password: document.getElementById('password'),
+  passwordModal: document.getElementById('passwordModal'),
+  changePasswordForm: document.getElementById('changePasswordForm'),
+  currentPassword: document.getElementById('currentPassword'),
+  changeNewPassword: document.getElementById('changeNewPassword'),
+  confirmNewPassword: document.getElementById('confirmNewPassword'),
+  changePasswordButton: document.getElementById('changePasswordButton'),
   demoNotice: document.getElementById('demoNotice'),
   logoutButton: document.getElementById('logoutButton'),
   roleBadge: document.getElementById('roleBadge'),
@@ -49,7 +55,7 @@ const elements = {
 
 function boot() {
   elements.demoNotice.textContent = isDemoMode()
-    ? 'โหมดตัวอย่างเปิดอยู่: ลองใช้ admin@example.com / admin123 หรือรหัสนักเรียน 68983244 / demo123 ได้ทันที'
+    ? 'โหมดตัวอย่างเปิดอยู่: ลองใช้ admin@example.com / admin123 หรือรหัสนักเรียน 68983244 / 1234 ได้ทันที'
     : 'เชื่อมต่อ Google Apps Script แล้ว ข้อมูลจะถูกอ่าน/เขียนจาก Google Sheet ใหม่';
 
   state.auth = getAuth();
@@ -58,11 +64,13 @@ function boot() {
   if (state.auth) {
     showApp();
     loadDashboard();
+    maybeForcePasswordChange();
   }
 }
 
 function bindEvents() {
   elements.loginForm.addEventListener('submit', handleLogin);
+  elements.changePasswordForm.addEventListener('submit', handleChangePassword);
   elements.logoutButton.addEventListener('click', logout);
   elements.submitForm.addEventListener('submit', handleSubmitWork);
   elements.reminderButton.addEventListener('click', handleReminder);
@@ -96,7 +104,12 @@ async function handleLogin(event) {
     saveAuth(state.auth);
     showApp();
     await loadDashboard();
-    toast(`ยินดีต้อนรับ ${result.user.name}`);
+    if (state.auth.user?.mustChangePassword) {
+      showPasswordModal();
+      toast('กรุณาเปลี่ยนรหัสผ่านก่อนเริ่มใช้งานครั้งแรก');
+    } else {
+      toast(`ยินดีต้อนรับ ${result.user.name}`);
+    }
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -107,9 +120,37 @@ async function handleLogin(event) {
 async function loadDashboard() {
   try {
     state.dashboard = await api('dashboard');
+    if (state.dashboard.user && state.auth) {
+      state.auth.user = state.dashboard.user;
+      saveAuth(state.auth);
+    }
     render();
+    maybeForcePasswordChange();
   } catch (error) {
     toast(error.message, true);
+  }
+}
+
+async function handleChangePassword(event) {
+  event.preventDefault();
+  const currentPassword = elements.currentPassword.value;
+  const newPassword = elements.changeNewPassword.value;
+  const confirmPassword = elements.confirmNewPassword.value;
+
+  try {
+    if (newPassword.length < 4) throw new Error('รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัว');
+    if (newPassword !== confirmPassword) throw new Error('ยืนยันรหัสผ่านใหม่ไม่ตรงกัน');
+    setBusy(elements.changePasswordButton, true, 'กำลังบันทึก...');
+    const result = await api('changePassword', { currentPassword, newPassword });
+    state.auth.user = result.user || { ...state.auth.user, mustChangePassword: false };
+    saveAuth(state.auth);
+    elements.changePasswordForm.reset();
+    hidePasswordModal();
+    toast('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setBusy(elements.changePasswordButton, false, 'บันทึกรหัสผ่านใหม่');
   }
 }
 
@@ -228,6 +269,7 @@ function renderCredentials(credentials) {
   elements.generatedCredential.classList.remove('hidden');
   elements.generatedCredential.innerHTML = `
     <strong>บัญชีที่สร้างล่าสุด</strong>
+    <span>รหัสผ่านนักเรียนเป็นรหัสชั่วคราว 4 ตัว และต้องเปลี่ยนเมื่อเข้าใช้ครั้งแรก</span>
     ${credentials.map(item => `
       <div>
         ${escapeHtml(item.name || item.userId)}:
@@ -410,6 +452,23 @@ function showApp() {
   elements.appView.classList.remove('hidden');
 }
 
+function maybeForcePasswordChange() {
+  if (state.auth?.user?.mustChangePassword) {
+    showPasswordModal();
+  } else {
+    hidePasswordModal();
+  }
+}
+
+function showPasswordModal() {
+  elements.passwordModal.classList.remove('hidden');
+  window.setTimeout(() => elements.currentPassword.focus(), 80);
+}
+
+function hidePasswordModal() {
+  elements.passwordModal.classList.add('hidden');
+}
+
 function logout() {
   localStorage.removeItem(STORAGE_KEY);
   state.auth = null;
@@ -494,8 +553,8 @@ function getDemoStore() {
   const now = new Date().toISOString();
   const data = {
     users: [
-      { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com' },
-      { userId: '68983244', password: 'demo123', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง' },
+      { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com', mustChangePassword: false },
+      { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', mustChangePassword: true },
       { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
     ],
     projects: [
@@ -551,6 +610,18 @@ async function demoApi(action, payload) {
 
   if (action === 'dashboard') {
     return demoDashboard(store, state.auth.user);
+  }
+
+  if (action === 'changePassword') {
+    const user = findDemoUser(store, state.auth.user.userId);
+    if (!user || user.password !== payload.currentPassword) throw new Error('รหัสผ่านเดิมไม่ถูกต้อง');
+    if (!payload.newPassword || payload.newPassword.length < 4) throw new Error('รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัว');
+    if (payload.newPassword === payload.currentPassword) throw new Error('กรุณาตั้งรหัสผ่านใหม่ที่ไม่ซ้ำกับรหัสเดิม');
+    user.password = payload.newPassword;
+    user.mustChangePassword = false;
+    setDemoStore(store);
+    const { password, ...safeUser } = user;
+    return { user: safeUser };
   }
 
   if (action === 'submitWork') {
@@ -620,10 +691,11 @@ async function demoApi(action, payload) {
           email: '',
           studentId,
           school: project.school || '',
-          generated: true
+          generated: true,
+          mustChangePassword: true
         };
         store.users.push(user);
-        credentials.push({ userId: studentId, password, name: user.name, generated: true });
+        credentials.push({ userId: studentId, password, name: user.name, generated: true, mustChangePassword: true });
       });
     });
     setDemoStore(store);
@@ -654,7 +726,8 @@ function normalizeNewUser(payload) {
       userId: studentId || payload.userId,
       studentId: studentId || payload.userId,
       password,
-      generated
+      generated,
+      mustChangePassword: true
     };
   }
 
@@ -664,7 +737,8 @@ function normalizeNewUser(payload) {
     userId: email || payload.userId,
     email: email || payload.userId,
     password,
-    generated
+    generated,
+    mustChangePassword: false
   };
 }
 
@@ -675,8 +749,7 @@ function findDemoUser(store, account) {
 }
 
 function generateDemoPassword() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  return Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join('');
 }
 
 function demoDashboard(store, user) {

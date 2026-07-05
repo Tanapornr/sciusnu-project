@@ -9,7 +9,7 @@ var SETTINGS = {
 var SHEETS = {
   users: {
     name: 'Users',
-    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt']
+    headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt']
   },
   projects: {
     name: 'Projects',
@@ -67,6 +67,7 @@ function route_(request) {
   if (action === 'login') return login_(payload);
 
   var user = requireUser_(request.token);
+  if (action === 'changePassword') return changePassword_(user, payload);
   if (action === 'dashboard') return dashboard_(user);
   if (action === 'submitWork') return submitWork_(user, payload);
   if (action === 'reviewSubmission') return reviewSubmission_(user, payload);
@@ -92,6 +93,28 @@ function login_(payload) {
   return {
     token: createToken_(user),
     user: safeUser_(user)
+  };
+}
+
+function changePassword_(user, payload) {
+  var currentPassword = String(payload.currentPassword || '');
+  var newPassword = String(payload.newPassword || '');
+  if (!currentPassword || !newPassword) throw new Error('กรุณากรอกรหัสผ่านเดิมและรหัสผ่านใหม่');
+  if (String(user.password || '') !== currentPassword) throw new Error('รหัสผ่านเดิมไม่ถูกต้อง');
+  if (newPassword.length < 4) throw new Error('รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัว');
+  if (newPassword === currentPassword) throw new Error('กรุณาตั้งรหัสผ่านใหม่ที่ไม่ซ้ำกับรหัสเดิม');
+
+  var now = new Date().toISOString();
+  updateRowById_(SHEETS.users, 'userId', user.userId, {
+    password: newPassword,
+    mustChangePassword: 'FALSE',
+    updatedAt: now,
+    passwordUpdatedAt: now
+  });
+  audit_(user.userId, 'changePassword', user.role);
+
+  return {
+    user: safeUser_(findUser_(user.userId))
   };
 }
 
@@ -241,8 +264,10 @@ function createUser_(user, payload) {
     studentId: normalized.studentId || '',
     school: normalized.school || '',
     active: 'TRUE',
+    mustChangePassword: normalized.mustChangePassword ? 'TRUE' : 'FALSE',
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    passwordUpdatedAt: ''
   });
   sendCredentialEmail_(normalized);
   audit_(user.userId, 'createUser', normalized.userId);
@@ -252,7 +277,8 @@ function createUser_(user, payload) {
       userId: normalized.userId,
       password: normalized.password,
       name: normalized.name,
-      generated: normalized.generated
+      generated: normalized.generated,
+      mustChangePassword: normalized.mustChangePassword
     }
   };
 }
@@ -294,7 +320,8 @@ function generateStudentAccounts_(user) {
     var names = split_(project.studentNames);
     ids.forEach(function (studentId, index) {
       if (findUser_(studentId)) return;
-      var password = generatePassword_();
+      var now = new Date().toISOString();
+      var password = generateStudentPassword_();
       var student = {
         userId: studentId,
         password: password,
@@ -304,15 +331,18 @@ function generateStudentAccounts_(user) {
         studentId: studentId,
         school: project.school || '',
         active: 'TRUE',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        mustChangePassword: 'TRUE',
+        createdAt: now,
+        updatedAt: now,
+        passwordUpdatedAt: ''
       };
       appendRow_(SHEETS.users, student);
       credentials.push({
         userId: student.userId,
         password: password,
         name: student.name,
-        generated: true
+        generated: true,
+        mustChangePassword: true
       });
     });
   });
@@ -323,10 +353,11 @@ function generateStudentAccounts_(user) {
 
 function normalizeNewUser_(payload) {
   var role = payload.role || 'student';
-  var password = payload.password || generatePassword_();
+  var password = payload.password || (role === 'student' ? generateStudentPassword_() : generatePassword_());
   var generated = !payload.password;
   var email = String(payload.email || '').trim();
   var studentId = String(payload.studentId || '').trim();
+  var mustChangePassword = role === 'student';
 
   if (!payload.name) throw new Error('กรุณากรอกชื่อ-สกุล');
 
@@ -341,7 +372,8 @@ function normalizeNewUser_(payload) {
       email: email,
       studentId: studentUser,
       school: payload.school || '',
-      generated: generated
+      generated: generated,
+      mustChangePassword: mustChangePassword
     };
   }
 
@@ -355,7 +387,8 @@ function normalizeNewUser_(payload) {
     email: staffUser,
     studentId: '',
     school: payload.school || '',
-    generated: generated
+    generated: generated,
+    mustChangePassword: false
   };
 }
 
@@ -387,18 +420,23 @@ function sanitizeFileName_(value) {
 
 function sendCredentialEmail_(user) {
   if (!user.email) return;
+  var body = [
+    'เรียน ' + user.name,
+    '',
+    'บัญชีของคุณถูกสร้างในระบบ ' + SETTINGS.appName,
+    'USER: ' + user.userId,
+    'PASSWORD: ' + user.password,
+    ''
+  ];
+  if (user.mustChangePassword) {
+    body.push('เมื่อเข้าสู่ระบบครั้งแรก กรุณาเปลี่ยนรหัสผ่านใหม่ก่อนเริ่มใช้งาน');
+    body.push('');
+  }
+  body.push('กรุณาเก็บรหัสผ่านนี้ไว้เป็นความลับ');
   MailApp.sendEmail(
     user.email,
     '[' + SETTINGS.appName + '] ข้อมูลเข้าสู่ระบบ',
-    [
-      'เรียน ' + user.name,
-      '',
-      'บัญชีของคุณถูกสร้างในระบบ ' + SETTINGS.appName,
-      'USER: ' + user.userId,
-      'PASSWORD: ' + user.password,
-      '',
-      'กรุณาเก็บรหัสผ่านนี้ไว้เป็นความลับ'
-    ].join('\n')
+    body.join('\n')
   );
 }
 
@@ -563,12 +601,17 @@ function safeUser_(user) {
     name: user.name,
     email: user.email,
     studentId: user.studentId,
-    school: user.school
+    school: user.school,
+    mustChangePassword: toBoolean_(user.mustChangePassword)
   };
 }
 
 function isActive_(user) {
   return String(user.active || 'TRUE').toUpperCase() !== 'FALSE';
+}
+
+function toBoolean_(value) {
+  return value === true || String(value || '').toUpperCase() === 'TRUE';
 }
 
 function parseRequest_(e) {
@@ -598,8 +641,10 @@ function ensureSheets_() {
       studentId: '',
       school: '',
       active: 'TRUE',
+      mustChangePassword: 'FALSE',
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      passwordUpdatedAt: ''
     });
   }
 }
@@ -699,6 +744,14 @@ function generatePassword_() {
   var password = '';
   for (var index = 0; index < 10; index += 1) {
     password += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  }
+  return password;
+}
+
+function generateStudentPassword_() {
+  var password = '';
+  for (var index = 0; index < 4; index += 1) {
+    password += String(Math.floor(Math.random() * 10));
   }
   return password;
 }
