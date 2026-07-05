@@ -1,6 +1,7 @@
 const CONFIG = window.STUDENT_SUBMIT_CONFIG || {};
 const STORAGE_KEY = 'projectflow_auth_v1';
 const DEMO_KEY = 'projectflow_demo_data_v2';
+const DEFAULT_VIEW = document.body.dataset.defaultView || '';
 
 const roleText = {
   student: 'นักเรียน',
@@ -50,6 +51,7 @@ const state = {
   auth: null,
   dashboard: null,
   view: 'overview',
+  defaultViewApplied: false,
   requestWizard: {
     step: 1,
     type: '',
@@ -390,6 +392,7 @@ function render() {
   renderRequests(requests, data.requestStats || deriveRequestStats(requests));
   renderSubmitOptions(projects);
   applyRoleVisibility(user.role);
+  applyDefaultView();
 }
 
 function renderStats(stats) {
@@ -904,6 +907,15 @@ function applyRoleVisibility(role) {
   if ((state.view === 'submit' && !isStudent) || (state.view === 'review' && !isReviewer) || (state.view === 'admin' && !isAdmin)) {
     switchView('overview');
   }
+}
+
+function applyDefaultView() {
+  if (state.defaultViewApplied || !DEFAULT_VIEW) return;
+  const button = document.querySelector(`[data-view="${DEFAULT_VIEW}"]`);
+  const panel = document.getElementById(`${DEFAULT_VIEW}Panel`);
+  if (!button || !panel || button.classList.contains('hidden')) return;
+  state.defaultViewApplied = true;
+  switchView(DEFAULT_VIEW);
 }
 
 function switchView(view) {

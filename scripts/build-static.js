@@ -6,6 +6,10 @@ const source = path.join(root, 'outputs', 'student-work-submission-new');
 const target = path.join(root, 'dist');
 const files = [
   'index.html',
+  'student.html',
+  'advisor.html',
+  'admin.html',
+  'requests.html',
   'style.css',
   'app.js',
   'config.js'
