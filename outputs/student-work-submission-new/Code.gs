@@ -168,10 +168,11 @@ function submitWork_(user, payload) {
   }
 
   if (!payload.title) throw new Error('กรุณากรอกชื่องาน');
-  if (!payload.fileUrl && !payload.fileData) throw new Error('กรุณาอัปโหลดไฟล์หรือแนบลิงก์ไฟล์งาน');
+  if (!payload.fileData) throw new Error('กรุณาอัปโหลดไฟล์ PDF');
+  validatePdfPayload_(payload);
 
   var now = new Date().toISOString();
-  var storedFile = payload.fileData ? storeSubmissionFile_(project, payload, user) : null;
+  var storedFile = storeSubmissionFile_(project, payload, user);
   var submission = {
     submissionId: 'SUB-' + Utilities.getUuid(),
     projectId: project.projectId,
@@ -179,9 +180,9 @@ function submitWork_(user, payload) {
     studentNames: user.name,
     title: payload.title,
     workType: payload.workType || 'ส่งงาน',
-    fileUrl: storedFile ? storedFile.url : payload.fileUrl,
-    fileName: storedFile ? storedFile.name : '',
-    driveFileId: storedFile ? storedFile.id : '',
+    fileUrl: storedFile.url,
+    fileName: storedFile.name,
+    driveFileId: storedFile.id,
     note: payload.note || '',
     status: 'ส่งแล้ว',
     reviewerId: '',
@@ -559,12 +560,14 @@ function normalizeNewUser_(payload) {
 }
 
 function storeSubmissionFile_(project, payload, user) {
+  validatePdfPayload_(payload);
   var root = DriveApp.getFolderById(SETTINGS.driveFolderId);
   var projectFolder = getOrCreateFolder_(root, sanitizeFileName_(project.projectId + ' - ' + project.title));
   var bytes = Utilities.base64Decode(payload.fileData);
   var originalName = payload.fileName || 'submission-file';
   var safeName = sanitizeFileName_(project.projectId + ' - ' + payload.title + ' - ' + originalName);
-  var blob = Utilities.newBlob(bytes, payload.fileMimeType || 'application/octet-stream', safeName);
+  if (!/\.pdf$/i.test(safeName)) safeName += '.pdf';
+  var blob = Utilities.newBlob(bytes, 'application/pdf', safeName);
   var file = projectFolder.createFile(blob);
   file.setDescription('Uploaded by ' + user.name + ' via ' + SETTINGS.appName);
   return {
@@ -572,6 +575,14 @@ function storeSubmissionFile_(project, payload, user) {
     name: file.getName(),
     url: file.getUrl()
   };
+}
+
+function validatePdfPayload_(payload) {
+  var fileName = String(payload.fileName || '').toLowerCase();
+  var mimeType = String(payload.fileMimeType || '').toLowerCase();
+  if (!payload.fileData || (mimeType !== 'application/pdf' && !/\.pdf$/i.test(fileName))) {
+    throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
+  }
 }
 
 function getOrCreateFolder_(parent, name) {

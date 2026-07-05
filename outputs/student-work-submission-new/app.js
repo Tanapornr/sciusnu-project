@@ -42,6 +42,7 @@ const elements = {
   submissionList: document.getElementById('submissionList'),
   reviewQueue: document.getElementById('reviewQueue'),
   submitProject: document.getElementById('submitProject'),
+  selectedProjectTitle: document.getElementById('selectedProjectTitle'),
   submitForm: document.getElementById('submitForm'),
   submitButton: document.getElementById('submitButton'),
   submissionFile: document.getElementById('submissionFile'),
@@ -75,6 +76,7 @@ function bindEvents() {
   elements.changePasswordForm.addEventListener('submit', handleChangePassword);
   elements.logoutButton.addEventListener('click', logout);
   elements.submitForm.addEventListener('submit', handleSubmitWork);
+  elements.submitProject.addEventListener('change', updateSelectedProjectTitle);
   elements.reminderButton.addEventListener('click', handleReminder);
   elements.userForm.addEventListener('submit', handleCreateUser);
   elements.projectForm.addEventListener('submit', handleCreateProject);
@@ -172,19 +174,19 @@ async function handleSubmitWork(event) {
 
   try {
     const selectedFile = elements.submissionFile.files[0];
+    if (!selectedFile) throw new Error('กรุณาอัปโหลดไฟล์ PDF');
+    if (!isPdfFile(selectedFile)) throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
     const filePayload = selectedFile ? await readFilePayload(selectedFile) : {};
-    const fileUrl = document.getElementById('fileUrl').value.trim();
-    if (!selectedFile && !fileUrl) throw new Error('กรุณาอัปโหลดไฟล์หรือใส่ลิงก์ไฟล์งาน');
 
     await api('submitWork', {
       projectId: elements.submitProject.value,
       workType: document.getElementById('workType').value,
       title: document.getElementById('submissionTitle').value.trim(),
-      fileUrl,
       note: document.getElementById('studentNote').value.trim(),
       ...filePayload
     });
     elements.submitForm.reset();
+    updateSelectedProjectTitle();
     toast('ส่งงานเรียบร้อยและแจ้งอาจารย์ทางอีเมลแล้ว');
     await loadDashboard();
     switchView('overview');
@@ -418,8 +420,25 @@ function renderReviewQueue(queue) {
 
 function renderSubmitOptions(projects) {
   elements.submitProject.innerHTML = projects.map(project => `
-    <option value="${escapeAttribute(project.projectId)}">${escapeHtml(project.title || project.projectId)}</option>
+    <option value="${escapeAttribute(project.projectId)}">${escapeHtml(project.projectId)} — ${escapeHtml(project.title || project.projectId)}</option>
   `).join('');
+  updateSelectedProjectTitle();
+}
+
+function updateSelectedProjectTitle() {
+  if (!elements.selectedProjectTitle) return;
+  const selectedProjectId = elements.submitProject.value;
+  const project = (state.dashboard?.projects || []).find(item => item.projectId === selectedProjectId);
+  if (!project) {
+    elements.selectedProjectTitle.classList.add('hidden');
+    elements.selectedProjectTitle.innerHTML = '';
+    return;
+  }
+  elements.selectedProjectTitle.classList.remove('hidden');
+  elements.selectedProjectTitle.innerHTML = `
+    <strong>${escapeHtml(project.title || project.projectId)}</strong>
+    <small>รหัสโครงงาน ${escapeHtml(project.projectId)}</small>
+  `;
 }
 
 function applyRoleVisibility(role) {
@@ -474,6 +493,11 @@ function readFilePayload(file) {
     reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
     reader.readAsDataURL(file);
   });
+}
+
+function isPdfFile(file) {
+  const fileName = String(file?.name || '').toLowerCase();
+  return file?.type === 'application/pdf' || fileName.endsWith('.pdf');
 }
 
 function isDemoMode() {
@@ -710,7 +734,8 @@ async function demoApi(action, payload) {
   if (action === 'submitWork') {
     const project = store.projects.find(item => item.projectId === payload.projectId);
     const now = new Date().toISOString();
-    const fileUrl = payload.fileUrl || (payload.fileName ? `https://drive.google.com/demo/${encodeURIComponent(payload.fileName)}` : '');
+    if (!payload.fileName || !String(payload.fileName).toLowerCase().endsWith('.pdf')) throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
+    const fileUrl = `https://drive.google.com/demo/${encodeURIComponent(payload.fileName)}`;
     store.submissions.unshift({
       submissionId: `S-${Date.now()}`,
       projectId: payload.projectId,

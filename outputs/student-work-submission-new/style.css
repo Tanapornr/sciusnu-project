@@ -710,6 +710,26 @@ a {
   grid-column: 1 / -1;
 }
 
+.project-title-preview {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 16px;
+  padding: 0.8rem 0.95rem;
+  color: #172033;
+  background: linear-gradient(135deg, rgba(240, 253, 250, 0.92), rgba(255, 255, 255, 0.78));
+  line-height: 1.55;
+}
+
+.project-title-preview strong {
+  font-weight: 900;
+}
+
+.project-title-preview small {
+  color: var(--primary-dark);
+  font-weight: 850;
+}
+
 .review-actions {
   display: flex;
   flex-wrap: wrap;

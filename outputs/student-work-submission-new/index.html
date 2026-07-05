@@ -105,13 +105,14 @@
             <div>
               <span class="eyebrow">Submit</span>
               <h2>ส่งงานใหม่</h2>
-              <p>อัปโหลดไฟล์โครงร่างเข้าคลัง Drive หรือแนบลิงก์ Google Drive/Docs/Slides ที่แชร์สิทธิ์แล้ว</p>
+              <p>อัปโหลดไฟล์ PDF เพื่อส่งให้อาจารย์ตรวจเท่านั้น</p>
             </div>
           </div>
           <form id="submitForm" class="form-grid">
-            <label>
+            <label class="full-field">
               โครงงาน
               <select id="submitProject" required></select>
+              <span id="selectedProjectTitle" class="project-title-preview hidden"></span>
             </label>
             <label>
               ประเภทงาน
@@ -128,12 +129,8 @@
               <input id="submissionTitle" placeholder="เช่น รายงานความก้าวหน้าครั้งที่ 1" required>
             </label>
             <label class="full-field">
-              ไฟล์โครงร่าง / ไฟล์งาน
-              <input id="submissionFile" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png">
-            </label>
-            <label class="full-field">
-              ลิงก์ไฟล์งานสำรอง
-              <input id="fileUrl" type="url" placeholder="https://drive.google.com/...">
+              ไฟล์ PDF โครงร่าง / ไฟล์งาน
+              <input id="submissionFile" type="file" accept=".pdf,application/pdf" required>
             </label>
             <label class="full-field">
               หมายเหตุถึงอาจารย์
