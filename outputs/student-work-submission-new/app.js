@@ -336,7 +336,9 @@ function renderProjects(projects) {
     return;
   }
 
-  elements.projectList.innerHTML = projects.map(project => `
+  elements.projectList.innerHTML = projects.map(project => {
+    const branchLabel = projectBranchLabel(project);
+    return `
     <article class="project-card">
       <div class="project-card-head">
         <span class="project-code">${escapeHtml(project.projectId)}</span>
@@ -350,11 +352,12 @@ function renderProjects(projects) {
         ${advisorBlock('อาจารย์ที่ปรึกษาโรงเรียน', project.schoolAdvisorName || project.schoolAdvisorId)}
       </div>
       <div class="meta-row">
-        ${project.school ? `<span class="pill">สาขา/โรงเรียน ${escapeHtml(project.school)}</span>` : ''}
+        ${branchLabel ? `<span class="pill branch-pill">สาขา ${escapeHtml(branchLabel)}</span>` : ''}
         ${project.dueDate ? `<span class="pill warning">กำหนด ${formatDate(project.dueDate)}</span>` : ''}
       </div>
     </article>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function advisorBlock(label, value) {
@@ -365,6 +368,14 @@ function advisorBlock(label, value) {
       <strong>${escapeHtml(name || 'ยังไม่ระบุ')}</strong>
     </div>
   `;
+}
+
+function projectBranchLabel(project) {
+  const projectId = String(project?.projectId || '').trim();
+  const segments = projectId.split('-').map(part => part.trim()).filter(Boolean);
+  if (segments.length >= 3) return segments[2].toUpperCase();
+  if (segments.length >= 2) return segments[1].toUpperCase();
+  return String(project?.branch || '').trim();
 }
 
 function renderSubmissions(submissions) {
