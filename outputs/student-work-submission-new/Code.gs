@@ -121,7 +121,10 @@ function changePassword_(user, payload) {
 }
 
 function dashboard_(user) {
-  var projects = filterProjectsForUser_(readRows_(SHEETS.projects), user);
+  var users = readRows_(SHEETS.users);
+  var projects = filterProjectsForUser_(readRows_(SHEETS.projects), user).map(function (project) {
+    return enrichProject_(project, users);
+  });
   var projectIds = projects.map(function (project) { return project.projectId; });
   var submissions = readRows_(SHEETS.submissions).filter(function (submission) {
     return user.role === 'admin' || projectIds.indexOf(submission.projectId) !== -1;
@@ -681,6 +684,24 @@ function enrichSubmission_(submission, projects) {
   submission.dueDate = project.dueDate || '';
   if (!submission.studentNames) submission.studentNames = project.studentNames || submission.studentId || '';
   return submission;
+}
+
+function enrichProject_(project, users) {
+  project.advisorName = advisorName_(project.advisorId, users);
+  project.coAdvisorName = advisorName_(project.coAdvisorId, users);
+  project.schoolAdvisorName = advisorName_(project.schoolAdvisorId, users);
+  return project;
+}
+
+function advisorName_(account, users) {
+  var key = String(account || '').trim().toLowerCase();
+  if (!key) return '';
+  var user = users.filter(function (item) {
+    return [item.userId, item.email].filter(Boolean).map(function (value) {
+      return String(value).trim().toLowerCase();
+    }).indexOf(key) !== -1;
+  })[0];
+  return user && user.name ? user.name : account;
 }
 
 function filterProjectsForUser_(projects, user) {

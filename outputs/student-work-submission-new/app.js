@@ -326,15 +326,33 @@ function renderProjects(projects) {
 
   elements.projectList.innerHTML = projects.map(project => `
     <article class="project-card">
+      <div class="project-card-head">
+        <span class="project-code">${escapeHtml(project.projectId)}</span>
+        <span class="status-chip ${statusClass(project.status)}">${escapeHtml(project.status || 'กำลังดำเนินการ')}</span>
+      </div>
       <h3>${escapeHtml(project.title || project.projectId)}</h3>
-      <p>${escapeHtml(project.studentNames || project.studentIds || 'ยังไม่ระบุนักเรียน')}</p>
+      <p class="student-line">${escapeHtml(project.studentNames || project.studentIds || 'ยังไม่ระบุนักเรียน')}</p>
+      <div class="advisor-grid">
+        ${advisorBlock('อาจารย์ที่ปรึกษาหลัก', project.advisorName || project.advisorId)}
+        ${advisorBlock('อาจารย์ที่ปรึกษาร่วม', project.coAdvisorName || project.coAdvisorId)}
+        ${advisorBlock('อาจารย์ที่ปรึกษาโรงเรียน', project.schoolAdvisorName || project.schoolAdvisorId)}
+      </div>
       <div class="meta-row">
-        <span class="pill">${escapeHtml(project.projectId)}</span>
-        <span class="pill">${escapeHtml(project.status || 'กำลังดำเนินการ')}</span>
+        ${project.school ? `<span class="pill">สาขา/โรงเรียน ${escapeHtml(project.school)}</span>` : ''}
         ${project.dueDate ? `<span class="pill warning">กำหนด ${formatDate(project.dueDate)}</span>` : ''}
       </div>
     </article>
   `).join('');
+}
+
+function advisorBlock(label, value) {
+  const name = String(value || '').trim();
+  return `
+    <div class="advisor-item ${name ? '' : 'is-empty'}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(name || 'ยังไม่ระบุ')}</strong>
+    </div>
+  `;
 }
 
 function renderSubmissions(submissions) {
