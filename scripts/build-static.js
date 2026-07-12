@@ -29,6 +29,10 @@ for (const file of files) {
       .replace('DEMO_MODE: true', 'DEMO_MODE: false');
   }
 
+  if (file === 'config.js' && process.env.GOOGLE_CLIENT_ID) {
+    content = content.replace("GOOGLE_CLIENT_ID: '',", "GOOGLE_CLIENT_ID: '" + process.env.GOOGLE_CLIENT_ID + "',");
+  }
+
   fs.writeFileSync(to, content, 'utf8');
 }
 

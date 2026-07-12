@@ -2,6 +2,7 @@ var SETTINGS = {
   spreadsheetId: PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '14Zs2kyIE8B3DpwvX78l8_IHqtQVYdWP6AZCaS_F0XRc',
   driveFolderId: PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID') || '1a2663IC5L_fkFE28AkUojDPVca8ITi8W',
   adminEmail: PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || 'admin@example.com',
+  googleClientId: PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_ID') || '',
   webUrl: PropertiesService.getScriptProperties().getProperty('WEB_URL') || 'https://sciusnu-project.vercel.app',
   prefix: 'NEW_',
   appName: 'ProjectFlow'
@@ -74,6 +75,7 @@ function route_(request) {
   var payload = request.payload || {};
 
   if (action === 'login') return login_(payload);
+  if (action === 'googleLogin') return googleLogin_(payload);
 
   var user = requireUser_(request.token);
   if (action === 'changePassword') return changePassword_(user, payload);
@@ -108,6 +110,50 @@ function login_(payload) {
     token: createToken_(user),
     user: safeUser_(user)
   };
+}
+
+function googleLogin_(payload) {
+  var googleUser = verifyGoogleToken_(payload.credential);
+  var email = String(googleUser.email || '').trim().toLowerCase();
+  if (!email) throw new Error('ไม่พบอีเมลจากบัญชี Google');
+
+  var user = findUser_(email);
+  if (!user || !isActive_(user)) {
+    throw new Error('อีเมล Gmail นี้ยังไม่มีสิทธิ์ในระบบ กรุณาติดต่อผู้ดูแลระบบ');
+  }
+
+  var safeUser = safeUser_(user);
+  safeUser.mustChangePassword = false;
+  safeUser.authProvider = 'google';
+  audit_(user.userId, 'googleLogin', email);
+  return {
+    token: createToken_(user),
+    user: safeUser
+  };
+}
+
+function verifyGoogleToken_(credential) {
+  var idToken = String(credential || '').trim();
+  if (!idToken) throw new Error('ไม่พบ token จาก Google');
+  if (!SETTINGS.googleClientId) {
+    throw new Error('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID ใน Apps Script');
+  }
+
+  var response = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), {
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error('ไม่สามารถยืนยันตัวตนกับ Google ได้');
+  }
+
+  var profile = JSON.parse(response.getContentText());
+  if (String(profile.aud || '') !== SETTINGS.googleClientId) {
+    throw new Error('Google Client ID ไม่ตรงกับระบบนี้');
+  }
+  if (String(profile.email_verified || '') !== 'true') {
+    throw new Error('อีเมล Google ยังไม่ได้รับการยืนยัน');
+  }
+  return profile;
 }
 
 function changePassword_(user, payload) {

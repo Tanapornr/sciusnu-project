@@ -116,6 +116,7 @@ function boot() {
 
   state.auth = getAuth();
   bindEvents();
+  setupGoogleAuth();
 
   if (hasStoredAuth(state.auth)) {
     renderLoadingShell();
@@ -199,11 +200,22 @@ function enhanceLoginView() {
     `);
     elements.loginButton.insertAdjacentHTML('afterend', `
       <div class="login-divider"><span>หรือ</span></div>
-      <button class="school-login-button" type="button">เข้าสู่ระบบด้วยบัญชีโรงเรียน</button>
+      <div class="google-login-area">
+        <div id="googleSignInButton" class="google-signin-button"></div>
+        <button id="googleLoginFallback" class="school-login-button google-fallback" type="button">เข้าสู่ระบบด้วย Gmail</button>
+        <small id="googleLoginHint">สำหรับอาจารย์และผู้ดูแลระบบที่มีอีเมลในระบบ</small>
+      </div>
     `);
-    loginCard.querySelector('.school-login-button')?.addEventListener('click', () => {
-      elements.account.focus();
-      toast('นักเรียนใช้รหัสนักเรียน ส่วนอาจารย์และผู้ดูแลระบบใช้อีเมลในการเข้าสู่ระบบ');
+    loginCard.querySelector('#googleLoginFallback')?.addEventListener('click', () => {
+      if (isDemoMode()) {
+        handleDemoGoogleLogin();
+        return;
+      }
+      if (!CONFIG.GOOGLE_CLIENT_ID) {
+        toast('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID สำหรับ Gmail Auth', true);
+        return;
+      }
+      toast('กำลังโหลด Google Login กรุณารอสักครู่');
     });
   }
 
@@ -274,6 +286,87 @@ function bindEvents() {
   });
 }
 
+function setupGoogleAuth() {
+  const buttonSlot = document.getElementById('googleSignInButton');
+  const fallback = document.getElementById('googleLoginFallback');
+  const hint = document.getElementById('googleLoginHint');
+  if (!buttonSlot || !fallback) return;
+
+  if (!CONFIG.GOOGLE_CLIENT_ID) {
+    buttonSlot.classList.add('hidden');
+    fallback.classList.remove('hidden');
+    if (hint) hint.textContent = 'ต้องตั้งค่า GOOGLE_CLIENT_ID ก่อนใช้งาน Gmail Auth';
+    return;
+  }
+
+  loadExternalScript('https://accounts.google.com/gsi/client')
+    .then(() => {
+      window.google.accounts.id.initialize({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential,
+        ux_mode: 'popup'
+      });
+      fallback.classList.add('hidden');
+      buttonSlot.classList.remove('hidden');
+      window.google.accounts.id.renderButton(buttonSlot, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        shape: 'rectangular',
+        text: 'signin_with',
+        logo_alignment: 'left',
+        width: Math.min(360, buttonSlot.offsetWidth || 360)
+      });
+      if (hint) hint.textContent = 'ระบบจะตรวจอีเมล Gmail กับบัญชีใน Google Sheet';
+    })
+    .catch(() => {
+      buttonSlot.classList.add('hidden');
+      fallback.classList.remove('hidden');
+      if (hint) hint.textContent = 'โหลด Google Login ไม่สำเร็จ กรุณาใช้รหัสผ่านหรือรีเฟรชหน้า';
+    });
+}
+
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', resolve, { once: true });
+      if (window.google?.accounts?.id) resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.defer = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+async function handleGoogleCredential(response) {
+  try {
+    if (!response?.credential) throw new Error('ไม่พบข้อมูลยืนยันตัวตนจาก Google');
+    const result = await api('googleLogin', { credential: response.credential });
+    await enterAuthenticatedSession(result, 'google');
+    toast(`ยินดีต้อนรับ ${result.user.name} ผ่าน Gmail`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleDemoGoogleLogin() {
+  try {
+    const email = elements.account.value.trim();
+    if (!email) throw new Error('กรุณากรอกอีเมลในช่องชื่อผู้ใช้ก่อน');
+    const result = await api('googleLogin', { email });
+    await enterAuthenticatedSession(result, 'google');
+    toast(`ยินดีต้อนรับ ${result.user.name} ผ่าน Gmail`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 async function handleLogin(event) {
   event.preventDefault();
   setBusy(elements.loginButton, true, 'กำลังเข้าสู่ระบบ...');
@@ -283,23 +376,25 @@ async function handleLogin(event) {
       account: elements.account.value.trim(),
       password: elements.password.value
     });
-    state.auth = { token: result.token, user: result.user };
-    saveAuth(state.auth);
-    renderLoadingShell();
-    showApp();
-    const loaded = await loadDashboard({ restore: true });
-    if (!loaded) return;
-    if (state.auth.user?.mustChangePassword) {
-      showPasswordModal();
-      toast('กรุณาเปลี่ยนรหัสผ่านก่อนเริ่มใช้งานครั้งแรก');
-    } else {
-      toast(`ยินดีต้อนรับ ${result.user.name}`);
-    }
+    const loaded = await enterAuthenticatedSession(result, 'password');
+    if (loaded && state.auth.user?.mustChangePassword) toast('กรุณาเปลี่ยนรหัสผ่านก่อนเริ่มใช้งานครั้งแรก');
+    if (loaded && !state.auth.user?.mustChangePassword) toast(`ยินดีต้อนรับ ${result.user.name}`);
   } catch (error) {
     toast(error.message, true);
   } finally {
     setBusy(elements.loginButton, false, 'เข้าสู่ระบบ');
   }
+}
+
+async function enterAuthenticatedSession(result, provider) {
+  state.auth = { token: result.token, user: result.user, provider };
+  saveAuth(state.auth);
+  renderLoadingShell();
+  showApp();
+  const loaded = await loadDashboard({ restore: true });
+  if (!loaded) return false;
+  if (provider === 'google') hidePasswordModal();
+  return true;
 }
 
 async function loadDashboard(options = {}) {
@@ -1642,6 +1737,10 @@ function clearAuth() {
 }
 
 function maybeForcePasswordChange() {
+  if (state.auth?.provider === 'google') {
+    hidePasswordModal();
+    return;
+  }
   if (state.auth?.user?.mustChangePassword) {
     showPasswordModal();
   } else {
@@ -1792,6 +1891,15 @@ async function demoApi(action, payload) {
     if (!user || user.password !== payload.password) throw new Error('บัญชีผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     const { password, ...safeUser } = user;
     return { token: `demo-${safeUser.userId}-${Date.now()}`, user: safeUser };
+  }
+
+  if (action === 'googleLogin') {
+    const email = String(payload.email || '').trim().toLowerCase();
+    const user = store.users.find(item => String(item.email || '').trim().toLowerCase() === email);
+    if (!user) throw new Error('อีเมล Gmail นี้ยังไม่มีสิทธิ์ในระบบ');
+    const { password, ...safeUser } = user;
+    safeUser.mustChangePassword = false;
+    return { token: `demo-google-${safeUser.userId}-${Date.now()}`, user: safeUser };
   }
 
   if (!state.auth) throw new Error('กรุณาเข้าสู่ระบบ');
