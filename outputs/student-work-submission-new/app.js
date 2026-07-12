@@ -109,6 +109,7 @@ const elements = {
 };
 
 function boot() {
+  enhanceLoginView();
   const demoMode = isDemoMode();
   elements.demoNotice.textContent = demoMode ? 'โหมดทดสอบระบบ' : '';
   elements.demoNotice.classList.toggle('hidden', !demoMode);
@@ -123,6 +124,102 @@ function boot() {
   } else {
     showLogin();
   }
+}
+
+function enhanceLoginView() {
+  const hero = document.querySelector('.login-hero');
+  const loginCard = document.querySelector('.login-card');
+  if (!hero || !loginCard || loginCard.dataset.enhanced === 'true') return;
+
+  hero.innerHTML = `
+    <div class="sat-brand">
+      <span class="sat-atom" aria-hidden="true">
+        <i></i>
+        <b></b>
+      </span>
+      <div>
+        <strong>ววม.</strong>
+        <small>ศูนย์มหาวิทยาลัยนเรศวร</small>
+      </div>
+    </div>
+    <div class="login-hero-copy">
+      <h1>
+        <span>ระบบสารสนเทศเพื่อติดตาม</span>
+        <strong>การส่งงานโครงงานของนักเรียน</strong>
+        <em>โครงการ ววม. ศูนย์มหาวิทยาลัยนเรศวร</em>
+      </h1>
+      <div class="orange-rule"></div>
+      <p>ระบบที่ช่วยอำนวยความสะดวกในการติดตาม ตรวจสอบ และประเมินความก้าวหน้าการส่งงานโครงงานของนักเรียนได้อย่างมีประสิทธิภาพ</p>
+    </div>
+    <div class="login-illustration" aria-hidden="true">
+      <span class="illus-orbit"></span>
+      <span class="illus-cloud">☁</span>
+      <span class="illus-folder">▰</span>
+      <span class="illus-chart">◖</span>
+      <div class="illus-laptop">
+        <span></span>
+        <b></b>
+        <i></i>
+      </div>
+      <span class="illus-clock">◷</span>
+    </div>
+  `;
+
+  const cardIntro = loginCard.querySelector(':scope > div');
+  if (cardIntro) {
+    cardIntro.className = 'login-card-head';
+    cardIntro.innerHTML = `
+      <div class="login-lock" aria-hidden="true">🔒</div>
+      <h2>เข้าสู่ระบบ</h2>
+    `;
+  }
+
+  const accountLabel = elements.account?.closest('label');
+  const passwordLabel = elements.password?.closest('label');
+  if (accountLabel) {
+    accountLabel.classList.add('login-field', 'user-field');
+    accountLabel.childNodes[0].textContent = '';
+    elements.account.placeholder = 'ชื่อผู้ใช้ (Username)';
+  }
+  if (passwordLabel) {
+    passwordLabel.classList.add('login-field', 'password-field');
+    passwordLabel.childNodes[0].textContent = '';
+    elements.password.placeholder = 'รหัสผ่าน (Password)';
+  }
+
+  if (elements.loginForm && !document.getElementById('loginOptions')) {
+    passwordLabel?.insertAdjacentHTML('afterend', `
+      <div id="loginOptions" class="login-options">
+        <label class="remember-row">
+          <input type="checkbox" aria-label="จดจำฉัน">
+          <span>จดจำฉัน</span>
+        </label>
+        <a href="mailto:sat@nu.ac.th">ลืมรหัสผ่าน?</a>
+      </div>
+    `);
+    elements.loginButton.insertAdjacentHTML('afterend', `
+      <div class="login-divider"><span>หรือ</span></div>
+      <button class="school-login-button" type="button">เข้าสู่ระบบด้วยบัญชีโรงเรียน</button>
+    `);
+    loginCard.querySelector('.school-login-button')?.addEventListener('click', () => {
+      elements.account.focus();
+      toast('นักเรียนใช้รหัสนักเรียน ส่วนอาจารย์และผู้ดูแลระบบใช้อีเมลในการเข้าสู่ระบบ');
+    });
+  }
+
+  if (!document.getElementById('loginFooter')) {
+    const footer = document.createElement('footer');
+    footer.id = 'loginFooter';
+    footer.className = 'login-footer';
+    footer.innerHTML = `
+      <span>📍 โครงการ ววม. ศูนย์มหาวิทยาลัยนเรศวร 99 หมู่ 9 ต.ท่าโพธิ์ อ.เมือง จ.พิษณุโลก 65000</span>
+      <span>🌐 www.sat.nu.ac.th</span>
+      <span>✉ sat@nu.ac.th</span>
+    `;
+    elements.loginView.appendChild(footer);
+  }
+
+  loginCard.dataset.enhanced = 'true';
 }
 
 function bindEvents() {
