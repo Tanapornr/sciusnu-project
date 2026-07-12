@@ -1496,6 +1496,7 @@ function safeUser_(user) {
     school: user.school,
     phone: user.phone,
     photoUrl: user.photoUrl,
+    passwordUpdatedAt: user.passwordUpdatedAt,
     mustChangePassword: toBoolean_(user.mustChangePassword)
   };
 }

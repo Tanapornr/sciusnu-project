@@ -282,6 +282,18 @@ function bindEvents() {
     const signButton = event.target.closest('[data-sign-request]');
     if (signButton) {
       signRequest(signButton.dataset.signRequest);
+      return;
+    }
+
+    const switchButton = event.target.closest('[data-switch-view]');
+    if (switchButton) {
+      switchView(switchButton.dataset.switchView);
+      return;
+    }
+
+    const passwordButton = event.target.closest('[data-open-password-modal]');
+    if (passwordButton) {
+      showPasswordModal();
     }
   });
 }
@@ -572,7 +584,7 @@ function renderCredentials(credentials) {
 }
 
 function render() {
-  const user = state.auth.user;
+  const user = state.dashboard?.user || state.auth.user;
   const data = state.dashboard || {};
   const projects = data.projects || [];
   const submissions = data.submissions || [];
@@ -583,17 +595,105 @@ function render() {
   elements.workspaceTitle.textContent = `สวัสดี ${user.name}`;
   elements.workspaceSubtitle.textContent = getSubtitle(user.role);
   elements.userName.textContent = user.name;
-  elements.userEmail.textContent = user.email || user.userId || '-';
+  elements.userEmail.textContent = user.role === 'student'
+    ? (user.school || user.email || `รหัส ${user.studentId || user.userId || '-'}`)
+    : (user.email || user.userId || '-');
   renderProfileShell(user, projects);
+  applyStudentShell(user.role);
 
-  renderStats(data.stats || deriveStats(projects, submissions, queue));
-  renderProjects(projects);
-  renderSubmissions(submissions);
+  if (user.role === 'student') {
+    renderStudentDashboard(data);
+  } else {
+    renderStats(data.stats || deriveStats(projects, submissions, queue));
+    renderProjects(projects);
+    renderSubmissions(submissions);
+  }
   renderReviewQueue(queue);
   renderRequests(requests, data.requestStats || deriveRequestStats(requests));
   renderSubmitOptions(projects);
   applyRoleVisibility(user.role);
   applyDefaultView();
+}
+
+function applyStudentShell(role) {
+  const isStudent = role === 'student';
+  elements.appView.classList.toggle('student-shell', isStudent);
+  document.body.classList.toggle('student-page', isStudent);
+  updateStudentNavigation(isStudent);
+  updateStudentBrand(isStudent);
+  updateStudentTopbar(isStudent);
+}
+
+function updateStudentNavigation(isStudent) {
+  const nav = document.querySelector('.nav-list');
+  if (!nav) return;
+  nav.classList.toggle('student-nav', isStudent);
+  if (!isStudent) {
+    document.querySelectorAll('[data-student-extra-nav]').forEach(item => item.remove());
+    const overview = nav.querySelector('[data-view="overview"]');
+    const submit = nav.querySelector('[data-view="submit"]');
+    const requests = nav.querySelector('[data-view="requests"]');
+    if (overview) overview.textContent = 'ภาพรวม';
+    if (submit) submit.textContent = 'ส่งงาน';
+    if (requests) requests.textContent = 'คำร้องทั่วไป';
+    return;
+  }
+
+  const labels = {
+    overview: '⌂ หน้าหลัก',
+    submit: '▧ รายการส่งงาน',
+    requests: '☷ คำร้องทั่วไป'
+  };
+  Object.entries(labels).forEach(([view, label]) => {
+    const button = nav.querySelector(`[data-view="${view}"]`);
+    if (button) button.textContent = label;
+  });
+
+  nav.querySelector('[data-view="review"]')?.classList.add('hidden');
+  nav.querySelector('[data-view="admin"]')?.classList.add('hidden');
+  if (!nav.querySelector('[data-student-extra-nav]')) {
+    nav.insertAdjacentHTML('beforeend', `
+      <button class="nav-item student-extra-nav" type="button" data-student-extra-nav>□ ปฏิทินกำหนดการ</button>
+      <button class="nav-item student-extra-nav" type="button" data-student-extra-nav>◇ ประกาศ/ข่าวสาร</button>
+      <button class="nav-item student-extra-nav" type="button" data-student-extra-nav>⇩ ดาวน์โหลดเอกสาร</button>
+      <button class="nav-item student-extra-nav" type="button" data-student-extra-nav>☏ ติดต่อสอบถาม</button>
+    `);
+  }
+}
+
+function updateStudentBrand(isStudent) {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  const mark = sidebar.querySelector('.brand-mark');
+  const title = sidebar.querySelector('.brand-line strong');
+  const subtitle = sidebar.querySelector('.brand-line span');
+  if (isStudent) {
+    if (mark) mark.textContent = 'ววม.';
+    if (title) title.textContent = 'ววม.';
+    if (subtitle) subtitle.textContent = 'ศูนย์มหาวิทยาลัยนเรศวร';
+    return;
+  }
+  if (mark) mark.textContent = 'PF';
+  if (title) title.textContent = 'ProjectFlow';
+  if (subtitle) subtitle.textContent = 'Student submission';
+}
+
+function updateStudentTopbar(isStudent) {
+  const topbar = document.querySelector('.topbar');
+  const profilePill = document.querySelector('.profile-pill');
+  if (!topbar) return;
+  if (!isStudent) {
+    document.getElementById('studentBellButton')?.remove();
+    return;
+  }
+  if (!document.getElementById('studentBellButton') && profilePill) {
+    profilePill.insertAdjacentHTML('beforebegin', `
+      <button id="studentBellButton" class="student-bell-button" type="button" aria-label="การแจ้งเตือน">
+        <span>🔔</span>
+        <b>3</b>
+      </button>
+    `);
+  }
 }
 
 function renderStats(stats) {
@@ -612,6 +712,348 @@ function renderStats(stats) {
   `).join('');
 }
 
+function renderStudentDashboard(data) {
+  const user = data.user || state.auth.user || {};
+  const projects = data.projects || [];
+  const submissions = data.submissions || [];
+  const project = projects[0] || {};
+  const overviewPanel = document.getElementById('overviewPanel');
+  if (!overviewPanel) return;
+
+  const displayName = user.name || 'นักเรียน';
+  overviewPanel.innerHTML = `
+    <div class="student-dashboard">
+      <section class="student-greeting">
+        <p>สวัสดีครับ,</p>
+        <h1>${escapeHtml(displayName)}</h1>
+        <strong>ยินดีต้อนรับเข้าสู่ระบบ</strong>
+      </section>
+
+      <section class="student-dashboard-grid">
+        ${studentProfilePanel(user)}
+        ${studentSummaryPanel(submissions)}
+        ${studentProjectPanel(project, user)}
+        ${studentCalendarPanel(project)}
+        ${studentSubmissionTable(submissions, project)}
+      </section>
+    </div>
+  `;
+}
+
+function studentProfilePanel(user) {
+  const studentId = user.studentId || user.userId || '-';
+  const email = user.email || '-';
+  const passwordDate = user.passwordUpdatedAt ? dateOnlyLabel(user.passwordUpdatedAt) : 'ยังไม่มีข้อมูล';
+  return `
+    <article class="student-card student-profile-card">
+      <button class="student-photo-button" type="button" data-photo-trigger aria-label="เปลี่ยนรูปนักเรียน">
+        ${avatarMarkup(user.photoUrl, user.name || studentId, 'student-profile-photo')}
+        <span class="student-camera-badge">📷</span>
+      </button>
+      <div class="student-profile-info">
+        ${studentInfoRow('✉', email, 'อีเมล')}
+        ${studentInfoRow('⌁', passwordDate, 'เปลี่ยนรหัสผ่านล่าสุด')}
+        ${studentInfoRow('▦', studentId, 'รหัสนักเรียน')}
+      </div>
+      <div class="student-profile-actions">
+        <button class="student-outline-button" type="button" data-photo-trigger>แก้ไขข้อมูลส่วนตัว</button>
+        <button class="student-muted-button" type="button" data-open-password-modal>เปลี่ยนรหัสผ่าน</button>
+      </div>
+    </article>
+  `;
+}
+
+function studentInfoRow(icon, value, label) {
+  return `
+    <div class="student-info-row">
+      <span>${escapeHtml(icon)}</span>
+      <div>
+        <strong>${escapeHtml(value || '-')}</strong>
+        <small>${escapeHtml(label)}</small>
+      </div>
+    </div>
+  `;
+}
+
+function studentSummaryPanel(submissions) {
+  const summary = studentSubmissionSummary(submissions);
+  return `
+    <article class="student-card student-work-overview-card">
+      <h2>ภาพรวมการส่งงาน</h2>
+      <div class="student-donut-wrap">
+        <div class="student-donut" style="--sent-end:${summary.sentEnd}deg; --pending-end:${summary.pendingEnd}deg;">
+          <span>${summary.total}</span>
+          <small>รายการ</small>
+        </div>
+        <div class="student-donut-legend">
+          ${studentLegendRow('sent', 'ส่งแล้ว', summary.sent)}
+          ${studentLegendRow('pending', 'รอตรวจสอบ', summary.pending)}
+          ${studentLegendRow('missing', 'ยังไม่ส่ง', summary.missing)}
+        </div>
+      </div>
+      <button class="student-orange-button" type="button" data-switch-view="submit">ดูรายการส่งงานทั้งหมด</button>
+    </article>
+  `;
+}
+
+function studentLegendRow(type, label, value) {
+  return `
+    <div class="student-legend-row">
+      <span class="student-dot ${escapeAttribute(type)}"></span>
+      <strong>${escapeHtml(label)}</strong>
+      <small>${escapeHtml(value)} รายการ</small>
+    </div>
+  `;
+}
+
+function studentSubmissionSummary(submissions) {
+  const total = Math.max(4, submissions.length);
+  const approved = submissions.filter(item => item.status === 'อนุมัติ').length;
+  const pending = submissions.filter(item => ['ส่งแล้ว', 'รอตรวจ', 'รอตรวจสอบ'].includes(item.status)).length;
+  const submittedOther = Math.max(submissions.length - approved - pending, 0);
+  const sent = approved + submittedOther;
+  const missing = Math.max(total - sent - pending, 0);
+  const sentEnd = Math.round((sent / total) * 360);
+  const pendingEnd = Math.round(((sent + pending) / total) * 360);
+  return { total, sent, pending, missing, sentEnd, pendingEnd };
+}
+
+function studentProjectPanel(project, user) {
+  const hasProject = Boolean(project.projectId || project.title);
+  const title = project.title || 'ยังไม่มีโครงงานในบัญชีนี้';
+  const status = project.status || (hasProject ? 'กำลังดำเนินการ' : 'รอข้อมูลโครงงาน');
+  const dueLabel = project.dueDate ? dateOnlyLabel(project.dueDate) : 'ยังไม่กำหนด';
+  const students = projectStudentsForDashboard(project, user);
+  const advisors = projectAdvisorsForDashboard(project);
+  return `
+    <article class="student-card student-project-card">
+      <div class="student-card-head">
+        <h2>โครงงานของฉัน</h2>
+      </div>
+      <div class="student-project-layout">
+        <div class="student-project-main">
+          <span class="student-document-icon">▤</span>
+          <div>
+            <h3>${escapeHtml(title)}</h3>
+            <p>
+              ${project.projectId ? `<span>รหัสโครงงาน ${escapeHtml(project.projectId)}</span>` : ''}
+              <span>ประเภท : ${escapeHtml(project.type || project.category || 'โครงงานวิทยาศาสตร์')}</span>
+            </p>
+            <div class="student-project-status">
+              <span>สถานะปัจจุบัน</span>
+              <strong>${escapeHtml(status)}</strong>
+            </div>
+            <div class="student-next-due">
+              <span>กำหนดส่งถัดไป</span>
+              <strong>${escapeHtml(dueLabel)}</strong>
+            </div>
+            <button class="student-outline-button compact" type="button" data-switch-view="submit">ดูรายละเอียดโครงงาน</button>
+          </div>
+        </div>
+
+        <div class="student-project-members">
+          <h4>สมาชิกในกลุ่ม (${students.length || 1} คน)</h4>
+          <div class="student-mini-list">
+            ${students.map(student => `
+              <div class="student-mini-person">
+                ${avatarMarkup(student.photoUrl, student.name || student.studentId, 'student-mini-avatar')}
+                <div>
+                  <strong>${escapeHtml(student.name || student.studentId)}</strong>
+                  <small>${escapeHtml(student.studentId || 'นักเรียน')}</small>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="student-project-advisors">
+          <h4>อาจารย์ที่ปรึกษา</h4>
+          <div class="student-mini-list">
+            ${advisors.map(advisor => `
+              <div class="student-mini-person">
+                <span class="student-advisor-avatar">👤</span>
+                <div>
+                  <strong>${escapeHtml(advisor.name || 'ยังไม่ระบุ')}</strong>
+                  <small>${escapeHtml(advisor.role)}</small>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function projectStudentsForDashboard(project, user) {
+  if (project.students && project.students.length) return project.students;
+  const ids = splitValues(project.studentIds);
+  const names = splitValues(project.studentNames);
+  if (ids.length || names.length) {
+    return (ids.length ? ids : names).map((studentId, index) => ({
+      studentId: ids[index] || studentId,
+      name: names[index] || studentId,
+      photoUrl: ''
+    }));
+  }
+  return [{
+    studentId: user.studentId || user.userId || '',
+    name: user.name || 'นักเรียน',
+    photoUrl: user.photoUrl || ''
+  }];
+}
+
+function projectAdvisorsForDashboard(project) {
+  return [
+    { role: 'อาจารย์ที่ปรึกษาหลัก', name: project.advisorName || project.advisorId },
+    { role: 'อาจารย์ที่ปรึกษาร่วม', name: project.coAdvisorName || project.coAdvisorId },
+    { role: 'อาจารย์ที่ปรึกษาโรงเรียน', name: project.schoolAdvisorName || project.schoolAdvisorId },
+    { role: 'แอดมินระบบ', name: 'เจ้าหน้าที่โครงการ' }
+  ];
+}
+
+function studentCalendarPanel(project) {
+  const items = studentScheduleItems(project);
+  return `
+    <article class="student-card student-calendar-card">
+      <div class="student-card-head inline">
+        <h2>ปฏิทินกำหนดการ</h2>
+        <button type="button">ดูทั้งหมด</button>
+      </div>
+      <div class="student-calendar-list">
+        ${items.map(item => {
+          const parts = thaiDateParts(item.date);
+          return `
+            <div class="student-calendar-item">
+              <div class="student-calendar-date">
+                <span>${escapeHtml(parts.month)}</span>
+                <strong>${escapeHtml(parts.day)}</strong>
+              </div>
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <small>${escapeHtml(parts.label)}</small>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </article>
+  `;
+}
+
+function studentSubmissionTable(submissions, project) {
+  const rows = studentSubmissionRows(submissions, project);
+  return `
+    <article class="student-card student-submission-card">
+      <h2>รายการส่งงานล่าสุด</h2>
+      <div class="student-table-wrap">
+        <table class="student-submission-table">
+          <thead>
+            <tr>
+              <th>รายการส่งงาน</th>
+              <th>กำหนดส่ง</th>
+              <th>สถานะ</th>
+              <th>วันที่ส่ง</th>
+              <th>การดำเนินการ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => `
+              <tr>
+                <td>
+                  <div class="student-file-cell">
+                    <span class="student-file-icon ${escapeAttribute(row.iconClass)}">${escapeHtml(row.icon)}</span>
+                    <strong>${escapeHtml(row.title)}</strong>
+                  </div>
+                </td>
+                <td>${escapeHtml(row.due)}</td>
+                <td><span class="student-row-status ${escapeAttribute(row.state)}">${escapeHtml(row.status)}</span></td>
+                <td>${escapeHtml(row.submittedAt)}</td>
+                <td>${row.action}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function studentSubmissionRows(submissions, project) {
+  const schedules = studentScheduleItems(project);
+  const stages = [
+    { title: 'เค้าโครงโครงงาน (Proposal)', keywords: ['ข้อเสนอโครงงาน', 'โครงร่าง', 'proposal'], icon: '▣', iconClass: 'doc' },
+    { title: 'ความก้าวหน้า ครั้งที่ 1', keywords: ['รายงานความก้าวหน้า', 'progress', 'ความก้าวหน้า'], icon: '▣', iconClass: 'slide' },
+    { title: 'บทที่ 1-3', keywords: ['บทที่ 1-3', 'บทที่ 1', 'chapter'], icon: '▣', iconClass: 'word' },
+    { title: 'เล่มสมบูรณ์', keywords: ['รูปเล่มสมบูรณ์', 'รายงานฉบับสมบูรณ์', 'final'], icon: '▣', iconClass: 'pdf' }
+  ];
+
+  return stages.map((stage, index) => {
+    const submission = findSubmissionByKeywords(submissions, stage.keywords);
+    const dueParts = thaiDateParts(schedules[index]?.date);
+    const status = submission ? displaySubmissionStatus(submission.status) : 'ยังไม่ส่ง';
+    const state = submission ? submissionState(submission) : 'missing';
+    return {
+      title: stage.title,
+      due: dueParts.label,
+      status,
+      state,
+      submittedAt: submission ? formatDate(submission.createdAt || submission.updatedAt) : '-',
+      icon: stage.icon,
+      iconClass: stage.iconClass,
+      action: studentSubmissionAction(submission)
+    };
+  });
+}
+
+function studentSubmissionAction(submission) {
+  if (!submission) {
+    return '<button class="student-table-button" type="button" data-switch-view="submit">ส่งงาน</button>';
+  }
+  if (submission.canViewFile !== false && submission.fileUrl) {
+    return `<a class="student-table-button muted" href="${escapeAttribute(submission.fileUrl)}" target="_blank" rel="noopener">ดูผลการตรวจสอบ</a>`;
+  }
+  return '<span class="student-table-empty">-</span>';
+}
+
+function studentScheduleItems(project) {
+  const finalDate = parseDateValue(project.dueDate) || addDays(new Date(), 60);
+  return [
+    { title: 'ส่งความก้าวหน้า ครั้งที่ 1', date: addDays(finalDate, -60) },
+    { title: 'ส่งบทที่ 1-3', date: addDays(finalDate, -40) },
+    { title: 'นำเสนอความก้าวหน้า', date: addDays(finalDate, -20) },
+    { title: 'ส่งเล่มสมบูรณ์', date: finalDate }
+  ];
+}
+
+function thaiDateParts(value) {
+  const date = parseDateValue(value);
+  if (!date) return { day: '--', month: '-', label: 'ยังไม่กำหนด' };
+  return {
+    day: new Intl.DateTimeFormat('th-TH', { day: '2-digit' }).format(date),
+    month: new Intl.DateTimeFormat('th-TH', { month: 'short' }).format(date).replace('.', ''),
+    label: new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
+  };
+}
+
+function dateOnlyLabel(value) {
+  const date = parseDateValue(value);
+  if (!date) return value || '-';
+  return new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+}
+
+function parseDateValue(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 function renderProfileShell(user, projects) {
   ensureProfileShell();
   const photoUrl = user.photoUrl || '';
@@ -628,7 +1070,7 @@ function renderProfileShell(user, projects) {
   const welcomeCard = document.getElementById('studentWelcomeCard');
   if (!welcomeCard) return;
   const isStudent = user.role === 'student';
-  welcomeCard.classList.toggle('hidden', !isStudent);
+  welcomeCard.classList.add('hidden');
   if (!isStudent) return;
 
   const studentId = user.studentId || user.userId || '-';
@@ -651,26 +1093,6 @@ function ensureProfileShell() {
     input.addEventListener('change', handleProfilePhotoChange);
     document.body.appendChild(input);
   }
-
-  const topbar = document.querySelector('.topbar');
-  if (!topbar || document.getElementById('studentWelcomeCard')) return;
-
-  const welcome = document.createElement('section');
-  welcome.id = 'studentWelcomeCard';
-  welcome.className = 'student-welcome-card hidden';
-  welcome.innerHTML = `
-    <div class="welcome-book" aria-hidden="true">📘</div>
-    <strong class="welcome-title">ยินดีต้อนรับ!</strong>
-    <button class="welcome-avatar-button" type="button" data-photo-trigger aria-label="เปลี่ยนรูปโปรไฟล์">
-      <span id="welcomeAvatar" class="welcome-avatar">U</span>
-      <small>เปลี่ยนรูป</small>
-    </button>
-    <h2 id="welcomeName">นักเรียน</h2>
-    <span id="welcomeStudentId" class="welcome-id">ID: -</span>
-    <p id="welcomeProjectHint">กดรูปเพื่อเปลี่ยนรูปโปรไฟล์</p>
-  `;
-  const profilePill = topbar.querySelector('.profile-pill');
-  topbar.insertBefore(welcome, profilePill || null);
 }
 
 function setAvatarContent(target, photoUrl, fallback, altText) {
@@ -1915,6 +2337,7 @@ async function demoApi(action, payload) {
     if (payload.newPassword === payload.currentPassword) throw new Error('กรุณาตั้งรหัสผ่านใหม่ที่ไม่ซ้ำกับรหัสเดิม');
     user.password = payload.newPassword;
     user.mustChangePassword = false;
+    user.passwordUpdatedAt = new Date().toISOString();
     setDemoStore(store);
     const { password, ...safeUser } = user;
     return { user: safeUser };
