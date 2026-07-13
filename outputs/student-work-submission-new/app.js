@@ -139,7 +139,7 @@ function enhanceLoginView() {
         <b></b>
       </span>
       <div>
-        <strong>ววม.</strong>
+        <strong>วมว.</strong>
         <small>ศูนย์มหาวิทยาลัยนเรศวร</small>
       </div>
     </div>
@@ -147,7 +147,7 @@ function enhanceLoginView() {
       <h1>
         <span>ระบบสารสนเทศเพื่อติดตาม</span>
         <strong>การส่งงานโครงงานของนักเรียน</strong>
-        <em>โครงการ ววม. ศูนย์มหาวิทยาลัยนเรศวร</em>
+        <em>โครงการ วมว. ศูนย์มหาวิทยาลัยนเรศวร</em>
       </h1>
       <div class="orange-rule"></div>
       <p>ระบบที่ช่วยอำนวยความสะดวกในการติดตาม ตรวจสอบ และประเมินความก้าวหน้าการส่งงานโครงงานของนักเรียนได้อย่างมีประสิทธิภาพ</p>
@@ -224,7 +224,7 @@ function enhanceLoginView() {
     footer.id = 'loginFooter';
     footer.className = 'login-footer';
     footer.innerHTML = `
-      <span>📍 โครงการ ววม. ศูนย์มหาวิทยาลัยนเรศวร 99 หมู่ 9 ต.ท่าโพธิ์ อ.เมือง จ.พิษณุโลก 65000</span>
+      <span>📍 โครงการ วมว. ศูนย์มหาวิทยาลัยนเรศวร 99 หมู่ 9 ต.ท่าโพธิ์ อ.เมือง จ.พิษณุโลก 65000</span>
       <span>🌐 www.sat.nu.ac.th</span>
       <span>✉ sat@nu.ac.th</span>
     `;
@@ -668,8 +668,8 @@ function updateStudentBrand(isStudent) {
   const title = sidebar.querySelector('.brand-line strong');
   const subtitle = sidebar.querySelector('.brand-line span');
   if (isStudent) {
-    if (mark) mark.textContent = 'ววม.';
-    if (title) title.textContent = 'ววม.';
+    if (mark) mark.textContent = 'วมว.';
+    if (title) title.textContent = 'วมว.';
     if (subtitle) subtitle.textContent = 'ศูนย์มหาวิทยาลัยนเรศวร';
     return;
   }
@@ -2110,13 +2110,32 @@ function showLogin() {
 
 function renderLoadingShell() {
   const user = state.auth?.user || {};
+  const role = user.role || 'student';
   elements.roleBadge.textContent = 'Loading';
   elements.workspaceTitle.textContent = 'กำลังโหลดข้อมูลของคุณ';
   elements.workspaceSubtitle.textContent = 'กำลังเตรียมข้อมูลการส่งโครงงาน';
   elements.userName.textContent = user.name || 'กำลังโหลด';
-  elements.userEmail.textContent = user.email || user.userId || '-';
+  elements.userEmail.textContent = role === 'student'
+    ? (user.school || user.email || `รหัส ${user.studentId || user.userId || '-'}`)
+    : (user.email || user.userId || '-');
   ensureProfileShell();
   setAvatarContent(elements.userInitial, user.photoUrl || '', userInitialText(user), user.name || 'ผู้ใช้งาน');
+  renderProfileShell(user, []);
+  applyStudentShell(role);
+  if (role === 'student') {
+    renderStudentLoadingDashboard(user);
+    elements.reviewQueue.innerHTML = loadingState('กำลังโหลดรายการตรวจงาน');
+    elements.requestStatsGrid.innerHTML = [1, 2, 3, 4].map(() => `
+      <div class="request-stat-card skeleton-card">
+        <span></span>
+        <strong></strong>
+      </div>
+    `).join('');
+    elements.requestList.innerHTML = loadingState('กำลังโหลดรายการคำร้อง');
+    renderSubmitOptions([]);
+    applyRoleVisibility(role);
+    return;
+  }
   elements.statsGrid.innerHTML = [1, 2, 3, 4].map(() => `
     <div class="stat-card skeleton-card">
       <span></span>
@@ -2134,7 +2153,78 @@ function renderLoadingShell() {
   `).join('');
   elements.requestList.innerHTML = loadingState('กำลังโหลดรายการคำร้อง');
   renderSubmitOptions([]);
-  applyRoleVisibility(user.role || 'student');
+  applyRoleVisibility(role);
+}
+
+function renderStudentLoadingDashboard(user) {
+  const overviewPanel = document.getElementById('overviewPanel');
+  if (!overviewPanel) return;
+  const name = user.name || 'นักเรียน';
+  overviewPanel.innerHTML = `
+    <div class="student-dashboard">
+      <section class="student-greeting">
+        <p>สวัสดีครับ,</p>
+        <h1>${escapeHtml(name)}</h1>
+        <strong>กำลังเตรียมข้อมูลของคุณ</strong>
+      </section>
+
+      <section class="student-dashboard-grid">
+        <article class="student-card student-profile-card student-loading-card">
+          <div class="student-loading-circle"></div>
+          <div class="student-loading-stack">
+            <span class="student-loading-line medium"></span>
+            <span class="student-loading-line short"></span>
+            <span class="student-loading-line"></span>
+          </div>
+          <div class="student-loading-stack">
+            <span class="student-loading-button"></span>
+            <span class="student-loading-button muted"></span>
+          </div>
+        </article>
+
+        <article class="student-card student-work-overview-card student-loading-card">
+          <span class="student-loading-line medium"></span>
+          <div class="student-donut-wrap">
+            <div class="student-loading-donut"></div>
+            <div class="student-loading-stack">
+              <span class="student-loading-line"></span>
+              <span class="student-loading-line"></span>
+              <span class="student-loading-line short"></span>
+            </div>
+          </div>
+          <span class="student-loading-button"></span>
+        </article>
+
+        <article class="student-card student-project-card student-loading-card">
+          <span class="student-loading-line medium"></span>
+          <div class="student-loading-project">
+            <span class="student-loading-icon"></span>
+            <div class="student-loading-stack">
+              <span class="student-loading-line"></span>
+              <span class="student-loading-line"></span>
+              <span class="student-loading-line short"></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="student-card student-calendar-card student-loading-card">
+          <span class="student-loading-line medium"></span>
+          <div class="student-loading-stack">
+            <span class="student-loading-line"></span>
+            <span class="student-loading-line"></span>
+            <span class="student-loading-line short"></span>
+          </div>
+        </article>
+
+        <article class="student-card student-submission-card student-loading-card">
+          <span class="student-loading-line medium"></span>
+          <span class="student-loading-line"></span>
+          <span class="student-loading-line"></span>
+          <span class="student-loading-line short"></span>
+        </article>
+      </section>
+    </div>
+  `;
 }
 
 function loadingState(text) {

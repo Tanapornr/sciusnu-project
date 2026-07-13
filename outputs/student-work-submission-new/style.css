@@ -3272,6 +3272,97 @@ body.student-page .ambient {
   font-weight: 900;
 }
 
+.student-loading-card {
+  overflow: hidden;
+  position: relative;
+}
+
+.student-loading-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.58) 45%, transparent 70%);
+  transform: translateX(-120%);
+  animation: studentLoadingSweep 1.3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.student-loading-stack {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.student-loading-line,
+.student-loading-button,
+.student-loading-circle,
+.student-loading-donut,
+.student-loading-icon {
+  display: block;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #eceff3, #f8fafc, #eceff3);
+  background-size: 220% 100%;
+  animation: shimmer 1.45s ease-in-out infinite;
+}
+
+.student-loading-line {
+  width: 100%;
+  height: 16px;
+}
+
+.student-loading-line.medium {
+  width: 62%;
+  height: 18px;
+}
+
+.student-loading-line.short {
+  width: 38%;
+}
+
+.student-loading-button {
+  width: 100%;
+  height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(255, 106, 34, 0.12), rgba(255, 241, 235, 0.96), rgba(255, 106, 34, 0.12));
+  background-size: 220% 100%;
+}
+
+.student-loading-button.muted {
+  background: linear-gradient(90deg, #eef2f7, #f8fafc, #eef2f7);
+  background-size: 220% 100%;
+}
+
+.student-loading-circle {
+  justify-self: center;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+}
+
+.student-loading-donut {
+  width: 122px;
+  height: 122px;
+  border-radius: 50%;
+}
+
+.student-loading-project {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.student-loading-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+}
+
+@keyframes studentLoadingSweep {
+  100% {
+    transform: translateX(120%);
+  }
+}
+
 @media (max-width: 1040px) {
   .login-layout,
   .app-layout,
