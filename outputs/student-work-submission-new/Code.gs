@@ -1372,6 +1372,7 @@ function enrichProject_(project, users) {
   project.advisorName = advisorName_(project.advisorId, users);
   project.coAdvisorName = advisorName_(project.coAdvisorId, users);
   project.schoolAdvisorName = advisorName_(project.schoolAdvisorId, users);
+  project.advisorProfiles = advisorProfiles_(project, users);
   project.students = projectStudents_(project, users);
   return project;
 }
@@ -1385,11 +1386,35 @@ function projectStudents_(project, users) {
       studentId: student.studentId || studentId,
       userId: student.userId || studentId,
       name: student.name || names[index] || studentId,
+      email: student.email || '',
       photoUrl: student.photoUrl || '',
       phone: student.phone || '',
       school: student.school || project.school || ''
     };
   });
+}
+
+function advisorProfiles_(project, users) {
+  return [
+    advisorProfile_(project.advisorId, users, 'อาจารย์ที่ปรึกษาหลัก', project.advisorName),
+    advisorProfile_(project.coAdvisorId, users, 'อาจารย์ที่ปรึกษาร่วม', project.coAdvisorName),
+    advisorProfile_(project.schoolAdvisorId, users, 'อาจารย์ที่ปรึกษาโรงเรียน', project.schoolAdvisorName)
+  ].filter(function (profile) {
+    return profile.name || profile.email || profile.userId;
+  });
+}
+
+function advisorProfile_(account, users, roleLabel, fallbackName) {
+  var user = findUserInList_(users, account) || {};
+  return {
+    userId: user.userId || account || '',
+    role: roleLabel,
+    name: user.name || fallbackName || account || '',
+    email: user.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(account || '')) ? account : ''),
+    phone: user.phone || '',
+    school: user.school || '',
+    photoUrl: user.photoUrl || ''
+  };
 }
 
 function findSubmissionStudent_(submission, project, users) {

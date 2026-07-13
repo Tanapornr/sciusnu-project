@@ -285,6 +285,30 @@ function bindEvents() {
       return;
     }
 
+    const projectButton = event.target.closest('[data-open-project-detail]');
+    if (projectButton) {
+      openProjectDetail(projectButton.dataset.openProjectDetail);
+      return;
+    }
+
+    const personButton = event.target.closest('[data-open-person]');
+    if (personButton) {
+      openPersonDetail(personButton.dataset.personType, personButton.dataset.personIndex);
+      return;
+    }
+
+    const copyEmailButton = event.target.closest('[data-copy-email]');
+    if (copyEmailButton) {
+      copyText(copyEmailButton.dataset.copyEmail, 'คัดลอกอีเมลแล้ว');
+      return;
+    }
+
+    const closeContactModal = event.target.closest('[data-close-contact-modal]');
+    if (closeContactModal || event.target.classList.contains('contact-modal')) {
+      document.getElementById('contactModal')?.remove();
+      return;
+    }
+
     const switchButton = event.target.closest('[data-switch-view]');
     if (switchButton) {
       switchView(switchButton.dataset.switchView);
@@ -294,6 +318,7 @@ function bindEvents() {
     const passwordButton = event.target.closest('[data-open-password-modal]');
     if (passwordButton) {
       showPasswordModal();
+      return;
     }
   });
 }
@@ -847,20 +872,23 @@ function studentProjectPanel(project, user) {
               <span>กำหนดส่งถัดไป</span>
               <strong>${escapeHtml(dueLabel)}</strong>
             </div>
-            <button class="student-outline-button compact" type="button" data-switch-view="submit">ดูรายละเอียดโครงงาน</button>
+            <button class="student-outline-button compact" type="button" data-open-project-detail="${escapeAttribute(project.projectId || '')}">ดูข้อมูลโครงงาน</button>
           </div>
         </div>
 
         <div class="student-project-members">
           <h4>สมาชิกในกลุ่ม (${students.length || 1} คน)</h4>
           <div class="student-mini-list">
-            ${students.map(student => `
-              <div class="student-mini-person">
-                ${avatarMarkup(student.photoUrl, student.name || student.studentId, 'student-mini-avatar')}
-                <div>
-                  <strong>${escapeHtml(student.name || student.studentId)}</strong>
-                  <small>${escapeHtml(student.studentId || 'นักเรียน')}</small>
-                </div>
+            ${students.map((student, index) => `
+              <div class="student-mini-person is-clickable">
+                <button class="student-mini-profile-button" type="button" data-open-person data-person-type="student" data-person-index="${escapeAttribute(index)}" aria-label="ดูข้อมูล ${escapeAttribute(student.name || student.studentId || 'สมาชิก')}">
+                  ${avatarMarkup(student.photoUrl, student.name || student.studentId, 'student-mini-avatar')}
+                  <div>
+                    <strong>${escapeHtml(student.name || student.studentId)}</strong>
+                    <small>${escapeHtml(student.studentId || student.email || 'นักเรียน')}</small>
+                  </div>
+                </button>
+                ${student.email ? `<a class="student-mini-mail" href="${escapeAttribute(mailtoHref(student.email))}" title="ส่งอีเมลถึง ${escapeAttribute(student.name || student.email)}">✉</a>` : ''}
               </div>
             `).join('')}
           </div>
@@ -869,13 +897,16 @@ function studentProjectPanel(project, user) {
         <div class="student-project-advisors">
           <h4>อาจารย์ที่ปรึกษา</h4>
           <div class="student-mini-list">
-            ${advisors.map(advisor => `
-              <div class="student-mini-person">
-                <span class="student-advisor-avatar">👤</span>
-                <div>
-                  <strong>${escapeHtml(advisor.name || 'ยังไม่ระบุ')}</strong>
-                  <small>${escapeHtml(advisor.role)}</small>
-                </div>
+            ${advisors.map((advisor, index) => `
+              <div class="student-mini-person is-clickable">
+                <button class="student-mini-profile-button" type="button" data-open-person data-person-type="advisor" data-person-index="${escapeAttribute(index)}" aria-label="ดูข้อมูล ${escapeAttribute(advisor.name || advisor.role || 'อาจารย์ที่ปรึกษา')}">
+                  ${avatarMarkup(advisor.photoUrl, advisor.name || advisor.email || advisor.role, 'student-advisor-avatar')}
+                  <div>
+                    <strong>${escapeHtml(advisor.name || 'ยังไม่ระบุ')}</strong>
+                    <small>${escapeHtml(advisor.role)}</small>
+                  </div>
+                </button>
+                ${advisor.email ? `<a class="student-mini-mail" href="${escapeAttribute(mailtoHref(advisor.email))}" title="ส่งอีเมลถึง ${escapeAttribute(advisor.name || advisor.email)}">✉</a>` : ''}
               </div>
             `).join('')}
           </div>
@@ -899,17 +930,174 @@ function projectStudentsForDashboard(project, user) {
   return [{
     studentId: user.studentId || user.userId || '',
     name: user.name || 'นักเรียน',
+    email: user.email || '',
+    phone: user.phone || '',
+    school: user.school || '',
     photoUrl: user.photoUrl || ''
   }];
 }
 
 function projectAdvisorsForDashboard(project) {
+  if (project.advisorProfiles && project.advisorProfiles.length) return project.advisorProfiles;
   return [
-    { role: 'อาจารย์ที่ปรึกษาหลัก', name: project.advisorName || project.advisorId },
-    { role: 'อาจารย์ที่ปรึกษาร่วม', name: project.coAdvisorName || project.coAdvisorId },
-    { role: 'อาจารย์ที่ปรึกษาโรงเรียน', name: project.schoolAdvisorName || project.schoolAdvisorId },
-    { role: 'แอดมินระบบ', name: 'เจ้าหน้าที่โครงการ' }
-  ];
+    { role: 'อาจารย์ที่ปรึกษาหลัก', name: project.advisorName || project.advisorId, email: emailFromValue(project.advisorId), userId: project.advisorId || '' },
+    { role: 'อาจารย์ที่ปรึกษาร่วม', name: project.coAdvisorName || project.coAdvisorId, email: emailFromValue(project.coAdvisorId), userId: project.coAdvisorId || '' },
+    { role: 'อาจารย์ที่ปรึกษาโรงเรียน', name: project.schoolAdvisorName || project.schoolAdvisorId, email: emailFromValue(project.schoolAdvisorId), userId: project.schoolAdvisorId || '' }
+  ].filter(advisor => advisor.name || advisor.email || advisor.userId);
+}
+
+function emailFromValue(value) {
+  const text = String(value || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? text : '';
+}
+
+function mailtoHref(email) {
+  const cleanEmail = String(email || '').trim();
+  return cleanEmail ? `mailto:${cleanEmail}?subject=${encodeURIComponent('ติดต่อจากระบบส่งงานโครงงาน')}` : '#';
+}
+
+function currentStudentProject(projectId) {
+  const projects = state.dashboard?.projects || [];
+  if (projectId) {
+    const found = projects.find(project => String(project.projectId || '') === String(projectId));
+    if (found) return found;
+  }
+  return projects[0] || {};
+}
+
+function openPersonDetail(type, index) {
+  const project = currentStudentProject();
+  const list = type === 'advisor'
+    ? projectAdvisorsForDashboard(project)
+    : projectStudentsForDashboard(project, state.dashboard?.user || state.auth?.user || {});
+  const person = list[Number(index)] || {};
+  if (!person.name && !person.email && !person.studentId && !person.userId) {
+    toast('ยังไม่มีข้อมูลบุคคลนี้ในฐานข้อมูล', true);
+    return;
+  }
+  showContactModal(person, type === 'advisor' ? 'ข้อมูลอาจารย์ที่ปรึกษา' : 'ข้อมูลสมาชิกในกลุ่ม');
+}
+
+function openProjectDetail(projectId) {
+  const project = currentStudentProject(projectId);
+  if (!project.projectId && !project.title) {
+    toast('ยังไม่มีข้อมูลโครงงานในบัญชีนี้', true);
+    return;
+  }
+  const students = projectStudentsForDashboard(project, state.dashboard?.user || state.auth?.user || {});
+  const advisors = projectAdvisorsForDashboard(project);
+  showContactModal({
+    name: project.title || project.projectId,
+    role: 'ข้อมูลโครงงาน',
+    projectId: project.projectId || '',
+    status: project.status || 'กำลังดำเนินการ',
+    school: project.school || '',
+    dueDate: project.dueDate ? dateOnlyLabel(project.dueDate) : 'ยังไม่กำหนด',
+    detailHtml: `
+      <div class="contact-project-summary">
+        ${contactDetailRow('รหัสโครงงาน', project.projectId || '-')}
+        ${contactDetailRow('สถานะ', project.status || 'กำลังดำเนินการ')}
+        ${contactDetailRow('กำหนดส่ง', project.dueDate ? dateOnlyLabel(project.dueDate) : 'ยังไม่กำหนด')}
+        ${contactDetailRow('ประเภท/สาขา', project.type || project.category || project.school || 'โครงงานวิทยาศาสตร์')}
+      </div>
+      <div class="contact-section">
+        <h3>สมาชิกในกลุ่ม</h3>
+        ${students.map(person => compactContactRow(person, 'นักเรียน')).join('')}
+      </div>
+      <div class="contact-section">
+        <h3>อาจารย์ที่ปรึกษา</h3>
+        ${advisors.map(person => compactContactRow(person, person.role)).join('')}
+      </div>
+    `
+  }, 'ข้อมูลโครงงาน');
+}
+
+function showContactModal(person, title) {
+  document.getElementById('contactModal')?.remove();
+  const email = person.email || '';
+  const phone = person.phone || '';
+  const meta = person.studentId || person.userId || person.role || '';
+  const mailto = email ? mailtoHref(email) : '';
+  const modal = document.createElement('div');
+  modal.id = 'contactModal';
+  modal.className = 'contact-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.innerHTML = `
+    <section class="contact-card">
+      <button class="contact-close" type="button" data-close-contact-modal aria-label="ปิด">×</button>
+      <div class="contact-hero">
+        ${avatarMarkup(person.photoUrl, person.name || person.email || person.projectId || 'ข้อมูล', 'contact-avatar')}
+        <div>
+          <span>${escapeHtml(title || person.role || 'ข้อมูล')}</span>
+          <h2>${escapeHtml(person.name || person.email || person.projectId || '-')}</h2>
+          <p>${escapeHtml(meta || person.status || '')}</p>
+        </div>
+      </div>
+
+      ${person.detailHtml || `
+        <div class="contact-detail-grid">
+          ${contactDetailRow('ชื่อ-นามสกุล', person.name || '-')}
+          ${contactDetailRow('บทบาท', person.role || (person.studentId ? 'นักเรียน' : '-'))}
+          ${contactDetailRow('รหัสนักเรียน/บัญชี', person.studentId || person.userId || '-')}
+          ${contactDetailRow('โรงเรียน/หน่วยงาน', person.school || '-')}
+          ${contactDetailRow('เบอร์โทร', phone || '-')}
+          ${contactDetailRow('อีเมล', email || '-')}
+        </div>
+      `}
+
+      <div class="contact-actions">
+        ${email ? `<a class="contact-action primary" href="${escapeAttribute(mailto)}">✉ ส่งอีเมล</a>` : `<button class="contact-action primary" type="button" disabled>✉ ไม่มีอีเมล</button>`}
+        ${email ? `<button class="contact-action" type="button" data-copy-email="${escapeAttribute(email)}">คัดลอกอีเมล</button>` : ''}
+        ${phone ? `<a class="contact-action" href="tel:${escapeAttribute(phone)}">โทรหา</a>` : ''}
+      </div>
+    </section>
+  `;
+  document.body.appendChild(modal);
+}
+
+function contactDetailRow(label, value) {
+  return `
+    <div class="contact-detail-row">
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(value || '-')}</strong>
+    </div>
+  `;
+}
+
+function compactContactRow(person, fallbackRole) {
+  const email = person.email || '';
+  return `
+    <div class="contact-compact-row">
+      ${avatarMarkup(person.photoUrl, person.name || person.email || fallbackRole, 'contact-compact-avatar')}
+      <div>
+        <strong>${escapeHtml(person.name || person.email || 'ยังไม่ระบุ')}</strong>
+        <small>${escapeHtml(person.role || fallbackRole || '')}${email ? ` · ${escapeHtml(email)}` : ''}</small>
+      </div>
+    </div>
+  `;
+}
+
+async function copyText(value, successMessage) {
+  const text = String(value || '').trim();
+  if (!text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const input = document.createElement('textarea');
+      input.value = text;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    toast(successMessage || 'คัดลอกแล้ว');
+  } catch (error) {
+    toast('คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง', true);
+  }
 }
 
 function studentCalendarPanel(project) {
@@ -2354,17 +2542,21 @@ function getDemoStore() {
     users: [
       { userId: 'admin@example.com', password: 'admin123', role: 'admin', name: 'ผู้ดูแลระบบ', email: 'admin@example.com', mustChangePassword: false },
       { userId: '68983244', password: '1234', role: 'student', name: 'ณภัทร ใจดี', email: 'student@example.com', studentId: '68983244', school: 'โรงเรียนตัวอย่าง', phone: '0818834211', photoUrl: '', mustChangePassword: true },
-      { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com' }
+      { userId: '68983428', password: '1234', role: 'student', name: 'ปัญญ์นิรี กัลยาณพจน์พร', email: 'friend@example.com', studentId: '68983428', school: 'โรงเรียนตัวอย่าง', phone: '0891234567', photoUrl: '', mustChangePassword: true },
+      { userId: 'advisor@example.com', password: 'demo123', role: 'advisor', name: 'ดร. ปรียา เมธากุล', email: 'advisor@example.com', phone: '055123456', school: 'มหาวิทยาลัยนเรศวร', photoUrl: '' },
+      { userId: 'coadvisor@example.com', password: 'demo123', role: 'co_advisor', name: 'รศ.ดร.วันดี วัฒนชัยยิ่งเจริญ', email: 'coadvisor@example.com', phone: '055654321', school: 'มหาวิทยาลัยนเรศวร', photoUrl: '' },
+      { userId: 'schooladvisor@example.com', password: 'demo123', role: 'school_advisor', name: 'อาจารย์ศรวรรณ ป้อมสุข', email: 'schooladvisor@example.com', phone: '0812223333', school: 'โรงเรียนตัวอย่าง', photoUrl: '' }
     ],
     projects: [
       {
         projectId: 'PF-001',
         title: 'ระบบแจ้งเตือนคุณภาพน้ำด้วย IoT',
-        studentIds: '68983244',
-        studentNames: 'ณภัทร ใจดี',
+        studentIds: '68983244,68983428',
+        studentNames: 'ณภัทร ใจดี,ปัญญ์นิรี กัลยาณพจน์พร',
         advisorId: 'advisor@example.com',
-        coAdvisorId: '',
-        schoolAdvisorId: '',
+        coAdvisorId: 'coadvisor@example.com',
+        schoolAdvisorId: 'schooladvisor@example.com',
+        school: 'MD',
         dueDate: '2026-08-15',
         status: 'กำลังดำเนินการ'
       }
@@ -2572,6 +2764,24 @@ function generateDemoPassword() {
   return Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join('');
 }
 
+function demoPersonName(store, account) {
+  const user = findDemoUser(store, account);
+  return user?.name || account || '';
+}
+
+function demoAdvisorProfile(store, account, role) {
+  const user = findDemoUser(store, account) || {};
+  return {
+    userId: user.userId || account || '',
+    role,
+    name: user.name || account || '',
+    email: user.email || emailFromValue(account),
+    phone: user.phone || '',
+    school: user.school || '',
+    photoUrl: user.photoUrl || ''
+  };
+}
+
 function demoDashboard(store, user) {
   const projects = filterProjects(store.projects, user).map(project => ({
     ...project,
@@ -2582,11 +2792,21 @@ function demoDashboard(store, user) {
         studentId,
         userId: student.userId || studentId,
         name: student.name || names[index] || studentId,
+        email: student.email || '',
         photoUrl: student.photoUrl || '',
         phone: student.phone || '',
         school: student.school || project.school || ''
       };
     })
+    ,
+    advisorName: demoPersonName(store, project.advisorId),
+    coAdvisorName: demoPersonName(store, project.coAdvisorId),
+    schoolAdvisorName: demoPersonName(store, project.schoolAdvisorId),
+    advisorProfiles: [
+      demoAdvisorProfile(store, project.advisorId, 'อาจารย์ที่ปรึกษาหลัก'),
+      demoAdvisorProfile(store, project.coAdvisorId, 'อาจารย์ที่ปรึกษาร่วม'),
+      demoAdvisorProfile(store, project.schoolAdvisorId, 'อาจารย์ที่ปรึกษาโรงเรียน')
+    ].filter(item => item.name || item.email || item.userId)
   }));
   const allowedIds = new Set(projects.map(item => item.projectId));
   const submissions = store.submissions.filter(item => user.role === 'admin' || allowedIds.has(item.projectId)).map(item => {
