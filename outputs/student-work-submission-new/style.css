@@ -1523,6 +1523,79 @@ a {
   color: var(--muted);
 }
 
+.project-progress-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem 0.85rem;
+  align-items: center;
+  border: 1px solid rgba(249, 115, 22, 0.16);
+  border-radius: 18px;
+  padding: 0.82rem;
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.92), rgba(255, 255, 255, 0.78));
+}
+
+.project-progress-block span,
+.project-progress-block small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.project-progress-block strong {
+  display: block;
+  color: #172033;
+}
+
+.project-progress-block b {
+  color: #f25b18;
+  font-size: 1.05rem;
+}
+
+.project-progress-bar {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #fed7aa;
+}
+
+.project-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff7a1a, #ff4b14);
+}
+
+.project-expert-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.project-expert-strip > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.project-expert-strip strong {
+  display: inline-flex;
+  gap: 0.36rem;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.36rem 0.62rem;
+  color: #7c2d12;
+  background: #fff7ed;
+  font-size: 0.78rem;
+}
+
+.project-expert-strip small {
+  color: #c2410c;
+  font-size: 0.7rem;
+}
+
 .meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -3080,6 +3153,45 @@ body.student-page .ambient {
 
 .student-next-due strong {
   color: #52525b;
+}
+
+.student-project-progress {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.8rem;
+  border: 1px solid rgba(249, 115, 22, 0.14);
+  border-radius: 16px;
+  padding: 0.72rem;
+  background: #fff7ed;
+}
+
+.student-project-progress span,
+.student-project-progress small {
+  display: block;
+  color: #9a3412;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.student-project-progress strong {
+  display: block;
+  margin-top: 0.12rem;
+  color: #27272a;
+  font-size: 0.88rem;
+}
+
+.student-progress-meter {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #fed7aa;
+}
+
+.student-progress-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff7a1a, #ff4b14);
 }
 
 .student-project-members,

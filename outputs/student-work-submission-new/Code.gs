@@ -13,9 +13,29 @@ var SHEETS = {
     name: 'Users',
     headers: ['userId', 'password', 'role', 'name', 'email', 'studentId', 'school', 'active', 'createdAt', 'updatedAt', 'mustChangePassword', 'passwordUpdatedAt', 'phone', 'photoUrl', 'photoFileId']
   },
+  students: {
+    name: 'Students',
+    headers: ['studentId', 'userId', 'prefix', 'name', 'email', 'phone', 'school', 'classLevel', 'room', 'photoUrl', 'projectIds', 'active', 'createdAt', 'updatedAt', 'note']
+  },
   projects: {
     name: 'Projects',
     headers: ['projectId', 'title', 'studentIds', 'studentNames', 'advisorId', 'coAdvisorId', 'schoolAdvisorId', 'school', 'dueDate', 'status', 'createdAt', 'updatedAt']
+  },
+  experts: {
+    name: 'Experts',
+    headers: ['expertId', 'name', 'email', 'phone', 'organization', 'expertise', 'expertRole', 'photoUrl', 'active', 'createdAt', 'updatedAt', 'note']
+  },
+  projectExperts: {
+    name: 'ProjectExperts',
+    headers: ['projectExpertId', 'projectId', 'expertId', 'expertRole', 'responsibility', 'assignedAt', 'active', 'note']
+  },
+  progressSteps: {
+    name: 'ProgressSteps',
+    headers: ['processId', 'stepOrder', 'title', 'description', 'workType', 'requiredFileType', 'defaultStatus', 'sortOrder', 'active']
+  },
+  projectProgress: {
+    name: 'ProjectProgress',
+    headers: ['projectProgressId', 'projectId', 'processId', 'status', 'percent', 'dueDate', 'startedAt', 'submittedAt', 'reviewedAt', 'completedAt', 'ownerId', 'reviewerId', 'submissionId', 'note', 'updatedAt']
   },
   submissions: {
     name: 'Submissions',
@@ -31,6 +51,21 @@ var SHEETS = {
   }
 };
 
+var DATA_OPTIONS = {
+  projectStatus: ['กำลังดำเนินการ', 'ส่งงานแล้ว', 'รอตรวจ', 'อนุมัติ', 'ขอแก้ไข', 'เสร็จสิ้น'],
+  progressStatus: ['not_started', 'in_progress', 'submitted', 'reviewing', 'revision', 'approved', 'completed'],
+  expertRole: ['advisor', 'co_advisor', 'school_advisor', 'external_expert', 'content_expert', 'methodology_expert'],
+  workType: ['ข้อเสนอโครงงาน', 'รายงานความก้าวหน้า', 'บทที่ 1-3', 'รูปเล่มสมบูรณ์', 'สไลด์นำเสนอ']
+};
+
+var DEFAULT_PROGRESS_STEPS = [
+  { processId: 'proposal', stepOrder: 1, title: 'โครงร่าง (Proposal)', description: 'ส่งและตรวจโครงร่างโครงงาน', workType: 'ข้อเสนอโครงงาน', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 1, active: 'TRUE' },
+  { processId: 'progress_1', stepOrder: 2, title: 'รายงานความก้าวหน้า', description: 'ส่งรายงานความก้าวหน้ารอบแรก', workType: 'รายงานความก้าวหน้า', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 2, active: 'TRUE' },
+  { processId: 'chapter_1_3', stepOrder: 3, title: 'บทที่ 1-3', description: 'ส่งเอกสารบทที่ 1-3 เพื่อให้อาจารย์ตรวจ', workType: 'บทที่ 1-3', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 3, active: 'TRUE' },
+  { processId: 'final_report', stepOrder: 4, title: 'รายงานฉบับสมบูรณ์', description: 'ส่งเล่มสมบูรณ์ของโครงงาน', workType: 'รูปเล่มสมบูรณ์', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 4, active: 'TRUE' },
+  { processId: 'presentation', stepOrder: 5, title: 'สไลด์นำเสนอ', description: 'ส่งไฟล์สำหรับการนำเสนอหรือสอบป้องกัน', workType: 'สไลด์นำเสนอ', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 5, active: 'TRUE' }
+];
+
 function doGet() {
   ensureSheets_();
   return json_({
@@ -38,7 +73,8 @@ function doGet() {
     data: {
       app: SETTINGS.appName,
       message: 'ProjectFlow Apps Script is ready',
-      sheets: Object.keys(SHEETS).map(function (key) { return sheetName_(SHEETS[key].name); })
+      sheets: Object.keys(SHEETS).map(function (key) { return sheetName_(SHEETS[key].name); }),
+      options: DATA_OPTIONS
     }
   });
 }
@@ -210,8 +246,21 @@ function updateProfilePhoto_(user, payload) {
 
 function dashboard_(user) {
   var users = readRows_(SHEETS.users);
+  var students = readRows_(SHEETS.students);
+  var experts = readRows_(SHEETS.experts);
+  var projectExperts = readRows_(SHEETS.projectExperts);
+  var progressSteps = readRows_(SHEETS.progressSteps);
+  var projectProgress = readRows_(SHEETS.projectProgress);
+  var projectContext = {
+    users: users,
+    students: students,
+    experts: experts,
+    projectExperts: projectExperts,
+    progressSteps: progressSteps,
+    projectProgress: projectProgress
+  };
   var projects = filterProjectsForUser_(readRows_(SHEETS.projects), user).map(function (project) {
-    return enrichProject_(project, users);
+    return enrichProject_(project, projectContext);
   });
   var projectIds = projects.map(function (project) { return project.projectId; });
   var submissions = readRows_(SHEETS.submissions).filter(function (submission) {
@@ -237,6 +286,7 @@ function dashboard_(user) {
     reviewQueue: reviewQueue,
     requests: requests,
     requestStats: requestStats,
+    options: DATA_OPTIONS,
     stats: {
       projects: projects.length,
       submitted: submissions.length,
@@ -290,6 +340,7 @@ function submitWork_(user, payload) {
   };
 
   appendRow_(SHEETS.submissions, submission);
+  markProjectProgressFromSubmission_(project, submission, 'submitted', now, user);
   updateRowById_(SHEETS.projects, 'projectId', project.projectId, { status: 'ส่งงานแล้ว', updatedAt: now });
   notifyReviewers_(project, submission);
   audit_(user.userId, 'submitWork', submission.submissionId);
@@ -321,6 +372,7 @@ function reviewSubmission_(user, payload) {
     reviewerNote: payload.note || '',
     updatedAt: now
   });
+  markProjectProgressFromReview_(project, submission, status, now, user, payload.note || '');
   updateRowById_(SHEETS.projects, 'projectId', project.projectId, {
     status: status === 'อนุมัติ' ? 'ผ่านการตรวจล่าสุด' : 'รอแก้ไข',
     updatedAt: now
@@ -526,6 +578,8 @@ function createUser_(user, payload) {
     updatedAt: now,
     passwordUpdatedAt: ''
   });
+  if (normalized.role === 'student') upsertStudentProfile_(normalized, '');
+  if (['advisor', 'co_advisor', 'school_advisor'].indexOf(normalized.role) !== -1) upsertExpertFromUser_(normalized);
   sendCredentialEmail_(normalized);
   audit_(user.userId, 'createUser', normalized.userId);
   return {
@@ -563,6 +617,8 @@ function createProject_(user, payload) {
     createdAt: now,
     updatedAt: now
   });
+  ensureProjectExpertLinks_();
+  ensureProjectProgressRows_();
   audit_(user.userId, 'createProject', payload.projectId);
   return { projectId: payload.projectId };
 }
@@ -595,6 +651,7 @@ function generateStudentAccounts_(user) {
         passwordUpdatedAt: ''
       };
       appendRow_(SHEETS.users, student);
+      upsertStudentProfile_(student, project.projectId);
       credentials.push({
         userId: student.userId,
         password: password,
@@ -698,6 +755,18 @@ function syncSourceDataFromSheet1_() {
       if (studentEmail) existingUsers[String(studentEmail).toLowerCase()] = true;
       createdStudents += 1;
     }
+    upsertStudentProfile_({
+      userId: studentId,
+      role: 'student',
+      name: studentName,
+      email: studentEmail,
+      studentId: studentId,
+      school: major,
+      phone: studentPhone,
+      active: 'TRUE',
+      createdAt: now,
+      updatedAt: now
+    }, projectId);
 
     var advisorId = collectStaff_(staff, existingUsers, 'advisor', advisorName, advisorEmail, advisorOrg, projectId);
     var coAdvisorId = collectStaff_(staff, existingUsers, 'co_advisor', coAdvisorName, coAdvisorEmail, coAdvisorOrg, projectId);
@@ -744,6 +813,17 @@ function syncSourceDataFromSheet1_() {
       mustChangePassword: item.email ? 'FALSE' : 'TRUE',
       passwordUpdatedAt: ''
     });
+    upsertExpertFromUser_({
+      userId: item.userId,
+      role: item.role,
+      name: item.name,
+      email: item.email,
+      school: item.school,
+      phone: '',
+      active: 'TRUE',
+      createdAt: now,
+      updatedAt: now
+    });
     existingUsers[String(item.userId).toLowerCase()] = true;
     if (item.email) existingUsers[String(item.email).toLowerCase()] = true;
     createdStaff += 1;
@@ -756,6 +836,8 @@ function syncSourceDataFromSheet1_() {
     project.studentIds = unique_(project.studentIds).join(', ');
     project.studentNames = unique_(project.studentNames).join(', ');
     appendRow_(SHEETS.projects, project);
+    ensureProjectExpertLinks_();
+    ensureProjectProgressRows_();
     existingProjects[projectId] = true;
     createdProjects += 1;
   });
@@ -1368,30 +1450,65 @@ function canReviewSubmission_(user, project) {
   return advisorKeys.some(function (key) { return userKeys.indexOf(key) !== -1; });
 }
 
-function enrichProject_(project, users) {
-  project.advisorName = advisorName_(project.advisorId, users);
-  project.coAdvisorName = advisorName_(project.coAdvisorId, users);
-  project.schoolAdvisorName = advisorName_(project.schoolAdvisorId, users);
-  project.advisorProfiles = advisorProfiles_(project, users);
-  project.students = projectStudents_(project, users);
+function enrichProject_(project, context) {
+  var projectContext = normalizeProjectContext_(context);
+  project.advisorName = advisorName_(project.advisorId, projectContext.users);
+  project.coAdvisorName = advisorName_(project.coAdvisorId, projectContext.users);
+  project.schoolAdvisorName = advisorName_(project.schoolAdvisorId, projectContext.users);
+  project.advisorProfiles = advisorProfiles_(project, projectContext.users);
+  project.students = projectStudents_(project, projectContext.users, projectContext.students);
+  project.experts = projectExperts_(project, projectContext.experts, projectContext.projectExperts);
+  var progress = projectProgress_(project, projectContext.progressSteps, projectContext.projectProgress);
+  project.progressSteps = progress.steps;
+  project.progressCurrent = progress.current;
+  project.progressPercent = progress.percent;
+  project.progressStatusText = progress.statusText;
   return project;
 }
 
-function projectStudents_(project, users) {
+function normalizeProjectContext_(context) {
+  if (Array.isArray(context)) {
+    return { users: context, students: [], experts: [], projectExperts: [], progressSteps: [], projectProgress: [] };
+  }
+  return {
+    users: context && context.users ? context.users : [],
+    students: context && context.students ? context.students : [],
+    experts: context && context.experts ? context.experts : [],
+    projectExperts: context && context.projectExperts ? context.projectExperts : [],
+    progressSteps: context && context.progressSteps ? context.progressSteps : [],
+    projectProgress: context && context.projectProgress ? context.projectProgress : []
+  };
+}
+
+function projectStudents_(project, users, studentProfiles) {
   var ids = split_(project.studentIds);
   var names = split_(project.studentNames);
   return ids.map(function (studentId, index) {
     var student = findUserInList_(users, studentId) || {};
+    var studentProfile = findStudentProfile_(studentProfiles || [], studentId) || {};
     return {
-      studentId: student.studentId || studentId,
-      userId: student.userId || studentId,
-      name: student.name || names[index] || studentId,
-      email: student.email || '',
-      photoUrl: student.photoUrl || '',
-      phone: student.phone || '',
-      school: student.school || project.school || ''
+      studentId: studentProfile.studentId || student.studentId || studentId,
+      userId: studentProfile.userId || student.userId || studentId,
+      prefix: studentProfile.prefix || '',
+      name: studentProfile.name || student.name || names[index] || studentId,
+      email: studentProfile.email || student.email || '',
+      photoUrl: studentProfile.photoUrl || student.photoUrl || '',
+      phone: studentProfile.phone || student.phone || '',
+      school: studentProfile.school || student.school || project.school || '',
+      classLevel: studentProfile.classLevel || '',
+      room: studentProfile.room || ''
     };
   });
+}
+
+function findStudentProfile_(students, account) {
+  var key = String(account || '').trim().toLowerCase();
+  if (!key) return null;
+  return students.filter(function (student) {
+    return [student.studentId, student.userId, student.email].filter(Boolean).map(function (value) {
+      return String(value).trim().toLowerCase();
+    }).indexOf(key) !== -1;
+  })[0] || null;
 }
 
 function advisorProfiles_(project, users) {
@@ -1415,6 +1532,189 @@ function advisorProfile_(account, users, roleLabel, fallbackName) {
     school: user.school || '',
     photoUrl: user.photoUrl || ''
   };
+}
+
+function projectExperts_(project, experts, projectExpertRows) {
+  var links = (projectExpertRows || []).filter(function (link) {
+    return String(link.projectId || '') === String(project.projectId || '') && String(link.active || 'TRUE').toUpperCase() !== 'FALSE';
+  });
+  return links.map(function (link) {
+    var expert = findExpert_(experts || [], link.expertId) || {};
+    return {
+      projectExpertId: link.projectExpertId || '',
+      expertId: link.expertId || expert.expertId || '',
+      role: link.expertRole || expert.expertRole || 'external_expert',
+      roleText: expertRoleText_(link.expertRole || expert.expertRole),
+      name: expert.name || link.expertId || '',
+      email: expert.email || '',
+      phone: expert.phone || '',
+      organization: expert.organization || '',
+      expertise: expert.expertise || '',
+      responsibility: link.responsibility || '',
+      photoUrl: expert.photoUrl || ''
+    };
+  });
+}
+
+function findExpert_(experts, expertId) {
+  var key = String(expertId || '').trim().toLowerCase();
+  if (!key) return null;
+  return experts.filter(function (expert) {
+    return [expert.expertId, expert.email, expert.name].filter(Boolean).map(function (value) {
+      return String(value).trim().toLowerCase();
+    }).indexOf(key) !== -1;
+  })[0] || null;
+}
+
+function projectProgress_(project, progressSteps, projectProgressRows) {
+  var steps = activeProgressSteps_(progressSteps);
+  var rows = {};
+  (projectProgressRows || []).forEach(function (row) {
+    if (String(row.projectId || '') === String(project.projectId || '')) rows[row.processId] = row;
+  });
+
+  var enriched = steps.map(function (step) {
+    var row = rows[step.processId] || {};
+    var status = row.status || step.defaultStatus || 'not_started';
+    return {
+      processId: step.processId,
+      stepOrder: Number(step.stepOrder || step.sortOrder || 0),
+      title: step.title,
+      description: step.description || '',
+      workType: step.workType || '',
+      requiredFileType: step.requiredFileType || 'pdf',
+      status: status,
+      statusText: progressStatusText_(status),
+      percent: Number(row.percent || progressPercentFromStatus_(status)),
+      dueDate: row.dueDate || (step.processId === 'final_report' ? project.dueDate : ''),
+      startedAt: row.startedAt || '',
+      submittedAt: row.submittedAt || '',
+      reviewedAt: row.reviewedAt || '',
+      completedAt: row.completedAt || '',
+      submissionId: row.submissionId || '',
+      note: row.note || ''
+    };
+  });
+
+  var current = enriched.filter(function (step) {
+    return ['approved', 'completed'].indexOf(step.status) === -1;
+  })[0] || enriched[enriched.length - 1] || {};
+  var percent = enriched.length
+    ? Math.round(enriched.reduce(function (sum, step) { return sum + Number(step.percent || 0); }, 0) / enriched.length)
+    : 0;
+
+  return {
+    steps: enriched,
+    current: current,
+    percent: percent,
+    statusText: current.statusText || 'ยังไม่เริ่ม'
+  };
+}
+
+function activeProgressSteps_(progressSteps) {
+  var source = progressSteps && progressSteps.length ? progressSteps : DEFAULT_PROGRESS_STEPS;
+  return source.filter(function (step) {
+    return String(step.active || 'TRUE').toUpperCase() !== 'FALSE';
+  }).sort(function (a, b) {
+    return Number(a.sortOrder || a.stepOrder || 0) - Number(b.sortOrder || b.stepOrder || 0);
+  });
+}
+
+function progressStatusText_(status) {
+  var map = {
+    not_started: 'ยังไม่เริ่ม',
+    in_progress: 'กำลังดำเนินการ',
+    submitted: 'ส่งแล้ว',
+    reviewing: 'รอตรวจสอบ',
+    revision: 'ส่งกลับแก้ไข',
+    approved: 'อนุมัติแล้ว',
+    completed: 'เสร็จสิ้น'
+  };
+  return map[status] || status || 'ยังไม่เริ่ม';
+}
+
+function progressPercentFromStatus_(status) {
+  var map = {
+    not_started: 0,
+    in_progress: 30,
+    submitted: 55,
+    reviewing: 70,
+    revision: 50,
+    approved: 100,
+    completed: 100
+  };
+  return map[status] === undefined ? 0 : map[status];
+}
+
+function expertRoleText_(role) {
+  var map = {
+    advisor: 'อาจารย์ที่ปรึกษาหลัก',
+    co_advisor: 'อาจารย์ที่ปรึกษาร่วม',
+    school_advisor: 'อาจารย์ที่ปรึกษาโรงเรียน',
+    external_expert: 'ผู้เชี่ยวชาญภายนอก',
+    content_expert: 'ผู้เชี่ยวชาญด้านเนื้อหา',
+    methodology_expert: 'ผู้เชี่ยวชาญด้านวิธีวิจัย'
+  };
+  return map[role] || role || 'ผู้เชี่ยวชาญ';
+}
+
+function markProjectProgressFromSubmission_(project, submission, status, now, actor) {
+  var processId = processIdFromWorkType_(submission.workType || submission.title);
+  if (!project.projectId || !processId) return;
+  ensureProjectProgressRows_();
+  var progressId = project.projectId + '-' + processId;
+  var progressStatus = status === 'submitted' ? 'reviewing' : status;
+  var dueDate = processId === 'final_report' ? (project.dueDate || '') : '';
+  upsertRowById_(SHEETS.projectProgress, 'projectProgressId', progressId, {
+    projectProgressId: progressId,
+    projectId: project.projectId,
+    processId: processId,
+    status: progressStatus,
+    percent: progressPercentFromStatus_(progressStatus),
+    dueDate: dueDate,
+    startedAt: now,
+    submittedAt: now,
+    reviewedAt: '',
+    completedAt: '',
+    ownerId: actor.userId || actor.studentId || '',
+    reviewerId: '',
+    submissionId: submission.submissionId || '',
+    note: submission.note || '',
+    updatedAt: now
+  });
+}
+
+function markProjectProgressFromReview_(project, submission, reviewStatus, now, reviewer, note) {
+  var processId = processIdFromWorkType_(submission.workType || submission.title);
+  if (!project.projectId || !processId) return;
+  var progressId = project.projectId + '-' + processId;
+  var progressStatus = reviewStatus === 'อนุมัติ' ? 'approved' : (reviewStatus === 'ขอแก้ไข' ? 'revision' : 'reviewing');
+  var completedAt = progressStatus === 'approved' ? now : '';
+  var dueDate = processId === 'final_report' ? (project.dueDate || '') : '';
+  upsertRowById_(SHEETS.projectProgress, 'projectProgressId', progressId, {
+    projectProgressId: progressId,
+    projectId: project.projectId,
+    processId: processId,
+    status: progressStatus,
+    percent: progressPercentFromStatus_(progressStatus),
+    dueDate: dueDate,
+    reviewedAt: now,
+    completedAt: completedAt,
+    reviewerId: reviewer.userId || reviewer.email || '',
+    submissionId: submission.submissionId || '',
+    note: note || '',
+    updatedAt: now
+  });
+}
+
+function processIdFromWorkType_(value) {
+  var text = String(value || '').toLowerCase();
+  if (/ข้อเสนอ|โครงร่าง|proposal/.test(text)) return 'proposal';
+  if (/ความก้าว|progress/.test(text)) return 'progress_1';
+  if (/บทที่\\s*1|1-3|chapter/.test(text)) return 'chapter_1_3';
+  if (/สมบูรณ์|final|เล่ม/.test(text)) return 'final_report';
+  if (/สไลด์|นำเสนอ|presentation|slide/.test(text)) return 'presentation';
+  return '';
 }
 
 function findSubmissionStudent_(submission, project, users) {
@@ -1568,7 +1868,12 @@ function ensureSheets_() {
       passwordUpdatedAt: ''
     });
   }
-  formatUsersSheet_();
+  seedProgressSteps_();
+  seedStudentsFromUsers_();
+  seedExpertsFromUsers_();
+  ensureProjectExpertLinks_();
+  ensureProjectProgressRows_();
+  formatDataSheets_();
 }
 
 function getSheet_(definition) {
@@ -1597,12 +1902,161 @@ function getSheet_(definition) {
   return sheet;
 }
 
-function formatUsersSheet_() {
-  var sheet = getSheet_(SHEETS.users);
+function formatDataSheets_() {
+  formatTextColumns_(SHEETS.users, ['userId', 'password', 'studentId', 'phone']);
+  formatTextColumns_(SHEETS.students, ['studentId', 'userId', 'phone', 'classLevel', 'room']);
+  formatTextColumns_(SHEETS.experts, ['expertId', 'phone']);
+  formatTextColumns_(SHEETS.projects, ['projectId']);
+  formatTextColumns_(SHEETS.projectExperts, ['projectExpertId', 'projectId', 'expertId']);
+  formatTextColumns_(SHEETS.projectProgress, ['projectProgressId', 'projectId', 'processId']);
+}
+
+function formatTextColumns_(definition, columns) {
+  var sheet = getSheet_(definition);
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  ['userId', 'password', 'studentId', 'phone'].forEach(function (header) {
+  columns.forEach(function (header) {
     var index = headers.indexOf(header);
     if (index !== -1) sheet.getRange(1, index + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+  });
+}
+
+function seedProgressSteps_() {
+  var existing = readRows_(SHEETS.progressSteps);
+  var existingIds = {};
+  existing.forEach(function (step) {
+    if (step.processId) existingIds[String(step.processId)] = true;
+  });
+  DEFAULT_PROGRESS_STEPS.forEach(function (step) {
+    if (!existingIds[String(step.processId)]) appendRow_(SHEETS.progressSteps, step);
+  });
+}
+
+function seedStudentsFromUsers_() {
+  if (readRows_(SHEETS.students).length > 0) return;
+  readRows_(SHEETS.users).filter(function (user) {
+    return user.role === 'student' && user.studentId;
+  }).forEach(function (user) {
+    upsertStudentProfile_(user, '');
+  });
+}
+
+function seedExpertsFromUsers_() {
+  if (readRows_(SHEETS.experts).length > 0) return;
+  readRows_(SHEETS.users).filter(function (user) {
+    return ['advisor', 'co_advisor', 'school_advisor'].indexOf(user.role) !== -1;
+  }).forEach(function (user) {
+    upsertExpertFromUser_(user);
+  });
+}
+
+function ensureProjectExpertLinks_() {
+  var existing = {};
+  readRows_(SHEETS.projectExperts).forEach(function (link) {
+    existing[String(link.projectId || '') + '|' + String(link.expertId || '') + '|' + String(link.expertRole || '')] = true;
+  });
+  readRows_(SHEETS.projects).forEach(function (project) {
+    appendProjectExpertLink_(existing, project, project.advisorId, 'advisor', 'ดูแลและอนุมัติการตรวจโครงงาน');
+    appendProjectExpertLink_(existing, project, project.coAdvisorId, 'co_advisor', 'ให้คำปรึกษาร่วมและติดตามความก้าวหน้า');
+    appendProjectExpertLink_(existing, project, project.schoolAdvisorId, 'school_advisor', 'ประสานงานและติดตามจากโรงเรียน');
+  });
+}
+
+function appendProjectExpertLink_(existing, project, expertId, expertRole, responsibility) {
+  if (!project.projectId || !expertId) return;
+  var key = String(project.projectId) + '|' + String(expertId) + '|' + String(expertRole);
+  if (existing[key]) return;
+  appendRow_(SHEETS.projectExperts, {
+    projectExpertId: project.projectId + '-' + expertRole,
+    projectId: project.projectId,
+    expertId: expertId,
+    expertRole: expertRole,
+    responsibility: responsibility || '',
+    assignedAt: project.createdAt || new Date().toISOString(),
+    active: 'TRUE',
+    note: ''
+  });
+  existing[key] = true;
+}
+
+function ensureProjectProgressRows_() {
+  var steps = activeProgressSteps_(readRows_(SHEETS.progressSteps));
+  var existing = {};
+  readRows_(SHEETS.projectProgress).forEach(function (row) {
+    existing[String(row.projectId || '') + '|' + String(row.processId || '')] = true;
+  });
+  readRows_(SHEETS.projects).forEach(function (project) {
+    steps.forEach(function (step) {
+      var key = String(project.projectId || '') + '|' + String(step.processId || '');
+      if (!project.projectId || existing[key]) return;
+      appendRow_(SHEETS.projectProgress, {
+        projectProgressId: project.projectId + '-' + step.processId,
+        projectId: project.projectId,
+        processId: step.processId,
+        status: step.defaultStatus || 'not_started',
+        percent: progressPercentFromStatus_(step.defaultStatus || 'not_started'),
+        dueDate: step.processId === 'final_report' ? (project.dueDate || '') : '',
+        startedAt: '',
+        submittedAt: '',
+        reviewedAt: '',
+        completedAt: '',
+        ownerId: '',
+        reviewerId: '',
+        submissionId: '',
+        note: '',
+        updatedAt: project.createdAt || new Date().toISOString()
+      });
+      existing[key] = true;
+    });
+  });
+}
+
+function upsertStudentProfile_(user, projectId) {
+  var studentId = String(user.studentId || user.userId || '').trim();
+  if (!studentId) return;
+  var existing = readRows_(SHEETS.students).filter(function (item) {
+    return String(item.studentId || '').trim() === studentId;
+  })[0] || {};
+  var projectIds = unique_(split_(existing.projectIds).concat(projectId ? [projectId] : []));
+  var now = new Date().toISOString();
+  upsertRowById_(SHEETS.students, 'studentId', studentId, {
+    studentId: studentId,
+    userId: user.userId || studentId,
+    prefix: existing.prefix || '',
+    name: user.name || existing.name || studentId,
+    email: user.email || existing.email || '',
+    phone: user.phone || existing.phone || '',
+    school: user.school || existing.school || '',
+    classLevel: user.classLevel || existing.classLevel || '',
+    room: user.room || existing.room || '',
+    photoUrl: user.photoUrl || existing.photoUrl || '',
+    projectIds: projectIds.join(', '),
+    active: user.active || existing.active || 'TRUE',
+    createdAt: existing.createdAt || user.createdAt || now,
+    updatedAt: now,
+    note: existing.note || ''
+  });
+}
+
+function upsertExpertFromUser_(user) {
+  var expertId = String(user.email || user.userId || '').trim();
+  if (!expertId) return;
+  var existing = readRows_(SHEETS.experts).filter(function (item) {
+    return String(item.expertId || '').trim().toLowerCase() === expertId.toLowerCase();
+  })[0] || {};
+  var now = new Date().toISOString();
+  upsertRowById_(SHEETS.experts, 'expertId', expertId, {
+    expertId: expertId,
+    name: user.name || existing.name || expertId,
+    email: user.email || existing.email || '',
+    phone: user.phone || existing.phone || '',
+    organization: user.school || existing.organization || '',
+    expertise: existing.expertise || '',
+    expertRole: user.role || existing.expertRole || 'external_expert',
+    photoUrl: user.photoUrl || existing.photoUrl || '',
+    active: user.active || existing.active || 'TRUE',
+    createdAt: existing.createdAt || user.createdAt || now,
+    updatedAt: now,
+    note: existing.note || ''
   });
 }
 
@@ -1649,6 +2103,26 @@ function updateRowById_(definition, idColumn, idValue, updates) {
     return;
   }
   throw new Error('ไม่พบรายการที่ต้องการอัปเดต');
+}
+
+function upsertRowById_(definition, idColumn, idValue, item) {
+  var sheet = getSheet_(definition);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0] || definition.headers;
+  var idIndex = headers.indexOf(idColumn);
+  if (idIndex === -1) throw new Error('ไม่พบคอลัมน์ ' + idColumn);
+
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    if (String(values[rowIndex][idIndex]) !== String(idValue)) continue;
+    definition.headers.forEach(function (header) {
+      if (item[header] === undefined) return;
+      var columnIndex = headers.indexOf(header);
+      if (columnIndex !== -1) sheet.getRange(rowIndex + 1, columnIndex + 1).setValue(item[header]);
+    });
+    return;
+  }
+
+  appendRow_(definition, item);
 }
 
 function audit_(actor, action, detail) {
@@ -1736,7 +2210,7 @@ function writeMissingAdvisorEmails_(spreadsheet, rows) {
 
 function repairStudentPasswordDisplay_() {
   var sheet = getSheet_(SHEETS.users);
-  formatUsersSheet_();
+  formatDataSheets_();
   var values = sheet.getDataRange().getValues();
   if (values.length <= 1) return { repaired: 0 };
 

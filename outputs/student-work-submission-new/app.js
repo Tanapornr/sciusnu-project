@@ -872,6 +872,7 @@ function studentProjectPanel(project, user) {
               <span>กำหนดส่งถัดไป</span>
               <strong>${escapeHtml(dueLabel)}</strong>
             </div>
+            ${studentProjectProgress(project)}
             <button class="student-outline-button compact" type="button" data-open-project-detail="${escapeAttribute(project.projectId || '')}">ดูข้อมูลโครงงาน</button>
           </div>
         </div>
@@ -1315,6 +1316,8 @@ function renderProjects(projects) {
       <h3>${escapeHtml(project.title || project.projectId)}</h3>
       <p class="student-line">${escapeHtml(project.studentNames || project.studentIds || 'ยังไม่ระบุนักเรียน')}</p>
       ${projectStudentStrip(project)}
+      ${projectProgressBlock(project)}
+      ${projectExpertsStrip(project)}
       <div class="advisor-grid">
         ${advisorBlock('อาจารย์ที่ปรึกษาหลัก', project.advisorName || project.advisorId)}
         ${advisorBlock('อาจารย์ที่ปรึกษาร่วม', project.coAdvisorName || project.coAdvisorId)}
@@ -1327,6 +1330,54 @@ function renderProjects(projects) {
     </article>
   `;
   }).join('');
+}
+
+function studentProjectProgress(project) {
+  if (!project.progressSteps?.length) return '';
+  const current = project.progressCurrent || {};
+  const percent = Number(project.progressPercent || 0);
+  return `
+    <div class="student-project-progress">
+      <div>
+        <span>กระบวนการปัจจุบัน</span>
+        <strong>${escapeHtml(current.title || 'ยังไม่เริ่ม')}</strong>
+        <small>${escapeHtml(current.statusText || project.progressStatusText || '')}</small>
+      </div>
+      <div class="student-progress-meter" aria-label="ความคืบหน้า ${escapeAttribute(percent)}%">
+        <span style="width:${Math.max(0, Math.min(100, percent))}%"></span>
+      </div>
+    </div>
+  `;
+}
+
+function projectProgressBlock(project) {
+  if (!project.progressSteps?.length) return '';
+  const current = project.progressCurrent || {};
+  const percent = Number(project.progressPercent || 0);
+  return `
+    <div class="project-progress-block">
+      <div>
+        <span>Progress</span>
+        <strong>${escapeHtml(current.title || 'ยังไม่เริ่ม')}</strong>
+        <small>${escapeHtml(current.statusText || project.progressStatusText || '')}</small>
+      </div>
+      <b>${escapeHtml(percent)}%</b>
+      <div class="project-progress-bar"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>
+    </div>
+  `;
+}
+
+function projectExpertsStrip(project) {
+  const experts = project.experts || [];
+  if (!experts.length) return '';
+  return `
+    <div class="project-expert-strip">
+      <span>ผู้เชี่ยวชาญ</span>
+      ${experts.slice(0, 4).map(expert => `
+        <strong>${escapeHtml(expert.name || expert.expertId)}<small>${escapeHtml(expert.roleText || expert.role || '')}</small></strong>
+      `).join('')}
+    </div>
+  `;
 }
 
 function projectStudentStrip(project) {
