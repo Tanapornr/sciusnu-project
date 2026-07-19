@@ -66,6 +66,8 @@ var DEFAULT_PROGRESS_STEPS = [
   { processId: 'presentation', stepOrder: 5, title: 'สไลด์นำเสนอ', description: 'ส่งไฟล์สำหรับการนำเสนอหรือสอบป้องกัน', workType: 'สไลด์นำเสนอ', requiredFileType: 'pdf', defaultStatus: 'not_started', sortOrder: 5, active: 'TRUE' }
 ];
 
+var DATA_SCHEMA_VERSION = 'advisor-data-v3';
+
 function doGet() {
   ensureSheets_();
   return json_({
@@ -1873,7 +1875,11 @@ function ensureSheets_() {
   seedExpertsFromUsers_();
   ensureProjectExpertLinks_();
   ensureProjectProgressRows_();
-  formatDataSheets_();
+  var properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty('DATA_SCHEMA_VERSION') !== DATA_SCHEMA_VERSION) {
+    formatDataSheets_();
+    properties.setProperty('DATA_SCHEMA_VERSION', DATA_SCHEMA_VERSION);
+  }
 }
 
 function getSheet_(definition) {
@@ -1914,9 +1920,10 @@ function formatDataSheets_() {
 function formatTextColumns_(definition, columns) {
   var sheet = getSheet_(definition);
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rowCount = Math.max(sheet.getLastRow(), 2);
   columns.forEach(function (header) {
     var index = headers.indexOf(header);
-    if (index !== -1) sheet.getRange(1, index + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+    if (index !== -1) sheet.getRange(1, index + 1, rowCount, 1).setNumberFormat('@');
   });
 }
 
@@ -1926,27 +1933,70 @@ function seedProgressSteps_() {
   existing.forEach(function (step) {
     if (step.processId) existingIds[String(step.processId)] = true;
   });
+  var pending = [];
   DEFAULT_PROGRESS_STEPS.forEach(function (step) {
-    if (!existingIds[String(step.processId)]) appendRow_(SHEETS.progressSteps, step);
+    if (!existingIds[String(step.processId)]) pending.push(step);
   });
+  appendRows_(SHEETS.progressSteps, pending);
 }
 
 function seedStudentsFromUsers_() {
   if (readRows_(SHEETS.students).length > 0) return;
-  readRows_(SHEETS.users).filter(function (user) {
-    return user.role === 'student' && user.studentId;
-  }).forEach(function (user) {
-    upsertStudentProfile_(user, '');
+  var projectsByStudent = {};
+  readRows_(SHEETS.projects).forEach(function (project) {
+    split_(project.studentIds).forEach(function (studentId) {
+      if (!projectsByStudent[studentId]) projectsByStudent[studentId] = [];
+      projectsByStudent[studentId].push(project.projectId);
+    });
   });
+  var now = new Date().toISOString();
+  var students = readRows_(SHEETS.users).filter(function (user) {
+    return user.role === 'student' && user.studentId;
+  }).map(function (user) {
+    var studentId = String(user.studentId || user.userId || '').trim();
+    return {
+      studentId: studentId,
+      userId: user.userId || studentId,
+      prefix: '',
+      name: user.name || studentId,
+      email: user.email || '',
+      phone: user.phone || '',
+      school: user.school || '',
+      classLevel: user.classLevel || '',
+      room: user.room || '',
+      photoUrl: user.photoUrl || '',
+      projectIds: unique_(projectsByStudent[studentId] || []).join(', '),
+      active: user.active || 'TRUE',
+      createdAt: user.createdAt || now,
+      updatedAt: now,
+      note: ''
+    };
+  });
+  appendRows_(SHEETS.students, students);
 }
 
 function seedExpertsFromUsers_() {
   if (readRows_(SHEETS.experts).length > 0) return;
-  readRows_(SHEETS.users).filter(function (user) {
+  var now = new Date().toISOString();
+  var experts = readRows_(SHEETS.users).filter(function (user) {
     return ['advisor', 'co_advisor', 'school_advisor'].indexOf(user.role) !== -1;
-  }).forEach(function (user) {
-    upsertExpertFromUser_(user);
+  }).map(function (user) {
+    return {
+      expertId: user.userId || user.email || user.name,
+      name: user.name || user.email || user.userId,
+      email: user.email || '',
+      phone: user.phone || '',
+      organization: user.school || '',
+      expertise: '',
+      expertRole: user.role,
+      photoUrl: user.photoUrl || '',
+      active: user.active || 'TRUE',
+      createdAt: user.createdAt || now,
+      updatedAt: now,
+      note: ''
+    };
   });
+  appendRows_(SHEETS.experts, experts);
 }
 
 function ensureProjectExpertLinks_() {
@@ -1954,18 +2004,20 @@ function ensureProjectExpertLinks_() {
   readRows_(SHEETS.projectExperts).forEach(function (link) {
     existing[String(link.projectId || '') + '|' + String(link.expertId || '') + '|' + String(link.expertRole || '')] = true;
   });
+  var pending = [];
   readRows_(SHEETS.projects).forEach(function (project) {
-    appendProjectExpertLink_(existing, project, project.advisorId, 'advisor', 'ดูแลและอนุมัติการตรวจโครงงาน');
-    appendProjectExpertLink_(existing, project, project.coAdvisorId, 'co_advisor', 'ให้คำปรึกษาร่วมและติดตามความก้าวหน้า');
-    appendProjectExpertLink_(existing, project, project.schoolAdvisorId, 'school_advisor', 'ประสานงานและติดตามจากโรงเรียน');
+    collectProjectExpertLink_(existing, pending, project, project.advisorId, 'advisor', 'ดูแลและอนุมัติการตรวจโครงงาน');
+    collectProjectExpertLink_(existing, pending, project, project.coAdvisorId, 'co_advisor', 'ให้คำปรึกษาร่วมและติดตามความก้าวหน้า');
+    collectProjectExpertLink_(existing, pending, project, project.schoolAdvisorId, 'school_advisor', 'ประสานงานและติดตามจากโรงเรียน');
   });
+  appendRows_(SHEETS.projectExperts, pending);
 }
 
-function appendProjectExpertLink_(existing, project, expertId, expertRole, responsibility) {
+function collectProjectExpertLink_(existing, pending, project, expertId, expertRole, responsibility) {
   if (!project.projectId || !expertId) return;
   var key = String(project.projectId) + '|' + String(expertId) + '|' + String(expertRole);
   if (existing[key]) return;
-  appendRow_(SHEETS.projectExperts, {
+  pending.push({
     projectExpertId: project.projectId + '-' + expertRole,
     projectId: project.projectId,
     expertId: expertId,
@@ -1984,11 +2036,12 @@ function ensureProjectProgressRows_() {
   readRows_(SHEETS.projectProgress).forEach(function (row) {
     existing[String(row.projectId || '') + '|' + String(row.processId || '')] = true;
   });
+  var pending = [];
   readRows_(SHEETS.projects).forEach(function (project) {
     steps.forEach(function (step) {
       var key = String(project.projectId || '') + '|' + String(step.processId || '');
       if (!project.projectId || existing[key]) return;
-      appendRow_(SHEETS.projectProgress, {
+      pending.push({
         projectProgressId: project.projectId + '-' + step.processId,
         projectId: project.projectId,
         processId: step.processId,
@@ -2008,6 +2061,7 @@ function ensureProjectProgressRows_() {
       existing[key] = true;
     });
   });
+  appendRows_(SHEETS.projectProgress, pending);
 }
 
 function upsertStudentProfile_(user, projectId) {
@@ -2083,6 +2137,17 @@ function appendRow_(definition, item) {
     return item[header] === undefined ? '' : item[header];
   });
   sheet.appendRow(row);
+}
+
+function appendRows_(definition, items) {
+  if (!items || !items.length) return;
+  var sheet = getSheet_(definition);
+  var rows = items.map(function (item) {
+    return definition.headers.map(function (header) {
+      return item[header] === undefined ? '' : item[header];
+    });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, definition.headers.length).setValues(rows);
 }
 
 function updateRowById_(definition, idColumn, idValue, updates) {
